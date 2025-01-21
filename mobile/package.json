@@ -21,6 +21,8 @@
     "@ionic/vue-router": "^8.0.0",
     "axios": "^1.7.9",
     "ionicons": "^7.0.0",
+    "pinia": "^2.3.1",
+    "pinia-plugin-persistedstate": "^4.2.0",
     "vue": "^3.3.0",
     "vue-router": "^4.2.0"
   },
@@ -34,6 +36,7 @@
     "eslint": "^8.35.0",
     "eslint-plugin-vue": "^9.9.0",
     "jsdom": "^22.1.0",
+    "sass": "^1.83.4",
     "terser": "^5.4.0",
     "typescript": "~5.6.2",
     "vite": "~5.2.0",

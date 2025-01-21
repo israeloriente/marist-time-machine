@@ -1,6 +1,6 @@
 from fastapi import FastAPI
-from api.minio import router as minio_router
 from api.auth import router as auth_router
+from api.images import router as images_router
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -15,5 +15,5 @@ app.add_middleware(
 
 
 # Registrar os routers
-app.include_router(minio_router)
 app.include_router(auth_router)
+app.include_router(images_router)

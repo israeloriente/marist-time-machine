@@ -39,7 +39,9 @@ import {
   IonToolbar,
   IonTitle,
 } from "@ionic/vue";
-import { requestResetPassword } from "@/services/authService";
+import { useAuthService } from "@/services/auth.service";
+
+const authService = useAuthService();
 
 const email = ref("");
 const isLoading = ref(false);
@@ -55,7 +57,7 @@ const resetPassword = async () => {
 
   isLoading.value = true;
 
-  requestResetPassword(email.value)
+  authService.requestResetPassword(email.value)
     .then(() => {
       message.value = "Código de reset enviado com sucesso!";
       toastColor.value = "success";

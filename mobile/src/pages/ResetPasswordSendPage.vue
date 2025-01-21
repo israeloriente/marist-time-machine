@@ -51,7 +51,9 @@ import {
   IonTitle,
 } from "@ionic/vue";
 import { useRoute, useRouter } from "vue-router";
-import { sendResetPassword } from "@/services/authService";
+import { useAuthService } from "@/services/auth.service";
+
+const authService = useAuthService();
 
 const resetCode = ref("");
 const newPassword = ref("");
@@ -74,7 +76,7 @@ const resetPassword = async () => {
 
   isLoading.value = true;
 
-  sendResetPassword(resetCode.value, newPassword.value)
+  authService.sendResetPassword(resetCode.value, newPassword.value)
     .then(() => {
       message.value = "Senha resetada com sucesso!";
       toastColor.value = "success";

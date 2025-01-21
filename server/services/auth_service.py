@@ -13,17 +13,22 @@ async def register_user_service(user: UserCreate) -> UserOut:
     if users_collection.find_one({"email": user.email}):
         raise HTTPException(status_code=400, detail="Email já está registrado")
     hashed_password = get_password_hash(user.password)
-    user_data = {"username": user.email, "email": user.email, "hashed_password": hashed_password}
+    user_data = {
+        "name": user.name,
+        "email": user.email,
+        "role": "user",
+        "phone": user.phone,
+        "hashed_password": hashed_password,
+        "grad_year": user.grad_year,}
     users_collection.insert_one(user_data)
     return UserOut(name=user.name, email=user.email)
 
 # Serviço de autenticação de usuário
 async def authenticate_user_service(form_data):
-    user = users_collection.find_one({"username": form_data.username})
+    user = users_collection.find_one({"email": form_data.username})
     if not user or not verify_password(form_data.password, user["hashed_password"]):
         raise HTTPException(status_code=401, detail="Credenciais inválidas")
-
-    access_token = create_access_token(data={"sub": user["email"]})
+    access_token = create_access_token(data={"sub": str(user["_id"]), "role": user["role"]})
     return {"access_token": access_token, "token_type": "bearer"}
 
 

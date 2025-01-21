@@ -1,52 +1,69 @@
 <template>
-  <div>
-    <h2>Upload de Imagem</h2>
-    <form @submit.prevent="uploadImage">
-      <input type="file" @change="handleFileChange" />
-      <button type="submit">Enviar</button>
-    </form>
-
-    <div v-if="uploading">
-      <p>Enviando imagem...</p>
-    </div>
-
-    <div v-if="message" :class="messageClass">
-      <p>{{ message }}</p>
-    </div>
-  </div>
-  <div>
-    <h1>Imagens do MinIO</h1>
-    <ion-button @click="fetchImages"> Listar Imagens </ion-button>
-    <div v-if="loading">Carregando imagens...</div>
-    <div v-if="error" class="error">Erro ao carregar imagens: {{ error }}</div>
-    <div v-if="images.length > 0">
-      <div v-for="(image, index) in images" :key="index">
-        <img
-          :src="imageUrl(image)"
-          alt="Imagem"
-          style="width: 200px; height: 200px; margin: 10px"
-        />
+  <ion-page>
+    <ion-header>
+      <ion-toolbar>
+        <ion-title>Enviar Fotos</ion-title>
+        <ion-buttons slot="end">
+          <ion-button v-if="images.length" @click="images = []">
+            <ion-icon :icon="trashOutline"></ion-icon>
+          </ion-button>
+        </ion-buttons>
+      </ion-toolbar>
+    </ion-header>
+    <ion-content>
+      <ion-card v-for="(image, index) in images" :key="index">
+        <img :src="image.preview" />
+      </ion-card>
+      <div class="divSubmitFile centralizeTotal" v-if="!images.length">
+        <ion-icon color="marista" :icon="cloudUploadOutline"></ion-icon>
+        <p>Selecione imagens de até 3MB</p>
+        <ion-button @click="triggerFileInput()" expand="block"> Selecionar Imagens </ion-button>
       </div>
-    </div>
-  </div>
+    </ion-content>
+    <input type="file" multiple accept="image/*" ref="fileInput" style="display: none" @change="handleFileChange" />
+    <ion-footer v-if="images.length">
+      <ion-button @click="uploadImage()" expand="block"> Enviar Photos </ion-button>
+    </ion-footer>
+    <!-- <div>
+      <h1>Imagens do MinIO</h1>
+      <div v-if="loading">Carregando imagens...</div>
+      <div v-if="error" class="error">Erro ao carregar imagens: {{ error }}</div>
+      <div v-if="images.length > 0">
+        <div v-for="(image, index) in images" :key="index">
+          <img :src="imageUrl(image)" alt="Imagem" style="width: 200px; height: 200px; margin: 10px" />
+        </div>
+      </div>
+    </div> -->
+  </ion-page>
 </template>
 
-<script setup>
+<script setup lang="ts">
 import { ref } from "vue";
+import {
+  IonButton,
+  IonContent,
+  IonButtons,
+  IonFooter,
+  IonPage,
+  IonIcon,
+  IonHeader,
+  IonToolbar,
+  IonTitle,
+  IonCard,
+} from "@ionic/vue";
 import axios from "axios";
+import { useUploadService } from "@/services/upload.service";
+import { cloudUploadOutline, trashOutline } from "ionicons/icons";
 
-// Definir as variáveis de estado
-const file = ref(null);
-const uploading = ref(false);
-const message = ref("");
-const messageClass = ref("");
+const uploadService = useUploadService();
 
-const images = ref([]);
+const images = ref<any[]>([]);
 const loading = ref(true);
-const error = ref(null);
+const error = ref();
+const fileInput = ref();
 
 // Função para construir a URL das imagens
-const imageUrl = (image) => {
+const imageUrl = (image: any) => {
   // URL do MinIO ou do seu servidor FastAPI
   return `http://localhost:9001/mybucket/${image}`;
 };
@@ -56,60 +73,62 @@ const fetchImages = async () => {
   try {
     const response = await axios.get("http://localhost:8000/images");
     images.value = response.data.images;
-  } catch (err) {
+  } catch (err: any) {
     error.value = "Falha ao carregar as imagens.";
   } finally {
     loading.value = false;
   }
 };
 
-// Função para lidar com a seleção do arquivo
-const handleFileChange = (event) => {
-  file.value = event.target.files[0];
+const triggerFileInput = () => {
+  fileInput.value.click();
+};
+
+const handleFileChange = (event: any) => {
+  const target = event.target as HTMLInputElement;
+  if (!target.files?.length) return;
+  images.value = Array.from(target.files)
+    .filter((file: File) => file.size < 3000000)
+    .map((file: File, index: number) => {
+      const newName = `${new Date().toISOString()}_${index + 1}.jpg`;
+      const fileWithNewName = new File([file], newName, { type: file.type });
+      return {
+        file: fileWithNewName,
+        preview: URL.createObjectURL(fileWithNewName),
+      };
+    });
 };
 
 // Função para enviar a imagem
 const uploadImage = async () => {
-  if (!file.value) {
-    message.value = "Por favor, selecione uma imagem para enviar.";
-    messageClass.value = "error";
-    return;
-  }
-
-  uploading.value = true;
-  message.value = "";
-  messageClass.value = "";
-
-  const formData = new FormData();
-  formData.append("file", file.value);
-
-  try {
-    const response = await axios.post(
-      "http://127.0.0.1:8000/upload/",
-      formData,
-      {
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
-      }
-    );
-    uploading.value = false;
-    message.value = "Imagem enviada com sucesso!";
-    messageClass.value = "success";
-  } catch (error) {
-    uploading.value = false;
-    message.value = "Erro ao enviar a imagem.";
-    messageClass.value = "error";
-  }
+  images.value.forEach((image) => {
+    uploadService.uploadImage(image.file).then((response) => {
+      console.log(response);
+    });
+  });
 };
 </script>
 
-<style scoped>
-.error {
-  color: red;
+<style scoped lang="scss">
+ion-content {
+  ion-card {
+    width: 44%;
+    float: left;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    margin: 10px;
+  }
+  .divSubmitFile {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    ion-icon {
+      font-size: 100px;
+    }
+  }
 }
-
-.success {
-  color: green;
+ion-footer {
+  padding: 5%;
 }
 </style>

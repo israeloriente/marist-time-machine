@@ -1,8 +1,7 @@
-import { createRouter, createWebHistory } from "@ionic/vue-router";
-import { RouteRecordRaw } from "vue-router";
+import { createRouter } from "@ionic/vue-router";
+import { createWebHashHistory, RouteRecordRaw } from "vue-router";
 import LoginPage from "@/pages/LoginPage.vue";
-import HomePage from "@/pages/HomePage.vue";
-import RegisterPage from "@/pages/RegisterPage.vue";
+import TabsPage from "@/pages/TabsPage.vue";
 import ResetPasswordRequestPage from "@/pages/ResetPasswordRequestPage.vue";
 import ResetPasswordSendPage from "@/pages/ResetPasswordSendPage.vue";
 
@@ -12,9 +11,9 @@ const routes: Array<RouteRecordRaw> = [
     redirect: "/home",
   },
   {
-    path: "/home",
-    name: "Home",
-    component: HomePage,
+    path: "/tabs",
+    name: "Tabs",
+    component: TabsPage,
   },
   {
     path: "/login",
@@ -22,24 +21,19 @@ const routes: Array<RouteRecordRaw> = [
     component: LoginPage,
   },
   {
-    path: "/register",
-    name: "Register",
-    component: RegisterPage
-  },
-  {
     path: "/reset-request",
     name: "ResetRequest",
-    component: ResetPasswordRequestPage
+    component: ResetPasswordRequestPage,
   },
   {
     path: "/reset-send",
     name: "ResetSend",
-    component: ResetPasswordSendPage
+    component: ResetPasswordSendPage,
   },
 ];
 
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history: createWebHashHistory(import.meta.env.BASE_URL),
   routes,
 });
 

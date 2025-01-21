@@ -5,7 +5,6 @@ from pydantic import BaseModel
 from services.auth_service import register_user_service, authenticate_user_service
 from models.user_models import UserCreate, UserOut
 from services.jwt_service import get_password_hash
-from pymongo import MongoClient
 from services.email_service import send_email
 from modules.db import users_collection
 
@@ -26,10 +25,7 @@ async def reset_password_request(request: ResetPasswordRequest):
         raise HTTPException(status_code=404, detail="Usuário não encontrado")
     # Gerar código aleatório de 4 dígitos
     reset_code = str(random.randint(1000, 9999))
-    # Armazenar o código de reset (pode ser em memória ou banco de dados temporário)
-    # Aqui, para simplificar, estamos apenas armazenando no próprio usuário no banco
     users_collection.update_one({"email": email}, {"$set": {"reset_code": reset_code}})
-    # Enviar o código por e-mail
     subject = "Código de reset de senha"
     body = f"Seu código de reset é: {reset_code}"
     send_email(subject, body, email)
