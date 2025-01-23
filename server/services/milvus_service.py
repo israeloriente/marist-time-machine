@@ -5,32 +5,50 @@ from PIL import Image  # Biblioteca para trabalhar com imagens
 import numpy as np  # Para conversão para array
 from pymilvus import connections, Collection, DataType, CollectionSchema, FieldSchema, utility, Index, IndexType
 from modules.db import photos_collection
-import time  # Importando time para aguardar a construção do índice
+
+# Função para criar a coleção
+def create_collection():
+    collection_name = "embeddings"
+    if utility.has_collection(collection_name):
+        print(f"Coleção '{collection_name}' já existe!")
+        return Collection(name=collection_name)
+    else:
+        # Definir esquema da coleção
+        fields = [
+            FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
+            FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=4096),  # Dimensão do vetor de embedding
+            FieldSchema(name="image_url", dtype=DataType.VARCHAR, max_length=255),
+        ]
+        schema = CollectionSchema(fields, "Coleção de embeddings de imagens")
+
+        # Criar a coleção com o esquema
+        collection = Collection(name=collection_name, schema=schema)
+        print(f"Coleção '{collection_name}' criada com sucesso!")
+        return collection
+
+def create_index(collection):
+    if collection.has_index():
+        print("Índice já existe!")
+    else:
+        index_params = {
+            "index_type": "IVF_FLAT",
+            "params": {"nlist": 100},
+            "metric_type": "COSINE"
+        }
+        collection.create_index(field_name="embedding", index_params=index_params)
+        print("Índice criado com sucesso!")
 
 # Conectar ao Milvus
 connections.connect("default", host="localhost", port="19530")
 
-# Configurar a coleção no Milvus
-collection_name = "embeddings"
+# Criar a coleção ou obter a coleção existente
+collection = create_collection()
 
-# # Deletar a coleção anterior, se ela existir
-# if collection_name in utility.list_collections():
-#     collection = Collection(collection_name)
-#     collection.drop()  # Remove a coleção existente
+# Criar o índice para a coleção
+create_index(collection)
 
-# Criar nova coleção com schema correto
-fields = [
-    FieldSchema(name="id", dtype=DataType.INT64, is_primary=True, auto_id=True),
-    FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=4096),  # Dimensão do modelo VGG-Face
-    FieldSchema(name="image_url", dtype=DataType.VARCHAR, max_length=255),
-]
-schema = CollectionSchema(fields, "Collection de embeddings de imagens")
-
-# Verificar se a coleção existe e carregar
-if utility.has_collection(collection_name):
-    collection = Collection(collection_name)
-else:
-    collection = Collection(name=collection_name, schema=schema)
+# Carregar a coleção para consultas
+collection.load()
 
 # Função para processar imagens do MongoDB
 def process_images():
@@ -60,6 +78,8 @@ def process_images():
                     detector_backend="opencv",
                     enforce_detection=True  # Forçar detecção de rostos
                 )
+
+                print(f"Detected {len(embeddings)} face(s) in image {photo['_id']}")
 
                 # Iterar sobre os embeddings (múltiplos rostos na imagem)
                 for idx, result in enumerate(embeddings):
@@ -110,7 +130,6 @@ def find_similar_faces(image_data: bytes, threshold: float = 0.80):
         # Obter o embedding do rosto detectado (no caso, o primeiro rosto)
         query_embedding = embeddings[0]["embedding"]
 
-        print(query_embedding)
 
         # Buscar todos os embeddings na coleção do Milvus
         # Realizar a busca para encontrar os embeddings mais similares
@@ -118,7 +137,8 @@ def find_similar_faces(image_data: bytes, threshold: float = 0.80):
             data=[query_embedding],  # O vetor de embedding para comparar
             anns_field="embedding",  # O campo de embedding na coleção
             param={"nprobe": 10},  # Parâmetro para busca (definir quantidade de vizinhos próximos)
-            limit=5,  # Limitar a 5 resultados mais próximos
+            limit=10,  # Limitar a 5 resultados mais próximos
+            output_fields=["image_url"]
         )
 
         # Filtrar resultados com base no limiar de similaridade
@@ -126,7 +146,7 @@ def find_similar_faces(image_data: bytes, threshold: float = 0.80):
         for result in search_result[0]:
             if result.distance <= threshold:
                 # Aqui buscamos a URL associada ao embedding
-                image_url = result.entity.get("image_url", "URL não disponível")
+                image_url = result.entity.get("image_url") or "URL não disponível"
                 similar_faces.append({
                     "image_url": image_url,
                     "similarity_score": result.distance

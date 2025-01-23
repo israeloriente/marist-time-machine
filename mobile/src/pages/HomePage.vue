@@ -16,7 +16,7 @@
       </ion-card>
       <div class="divSubmitFile centralizeTotal" v-if="!images.length">
         <ion-icon color="marista" :icon="cloudUploadOutline"></ion-icon>
-        <p>Selecione imagens de até 3MB</p>
+        <p>Selecione imagens de até 5MB</p>
         <ion-button @click="triggerFileInput()" expand="block"> Selecionar Imagens </ion-button>
       </div>
     </ion-content>
@@ -24,16 +24,6 @@
     <ion-footer v-if="images.length">
       <ion-button @click="uploadImage()" expand="block"> Enviar Photos </ion-button>
     </ion-footer>
-    <!-- <div>
-      <h1>Imagens do MinIO</h1>
-      <div v-if="loading">Carregando imagens...</div>
-      <div v-if="error" class="error">Erro ao carregar imagens: {{ error }}</div>
-      <div v-if="images.length > 0">
-        <div v-for="(image, index) in images" :key="index">
-          <img :src="imageUrl(image)" alt="Imagem" style="width: 200px; height: 200px; margin: 10px" />
-        </div>
-      </div>
-    </div> -->
   </ion-page>
 </template>
 
@@ -88,7 +78,7 @@ const handleFileChange = (event: any) => {
   const target = event.target as HTMLInputElement;
   if (!target.files?.length) return;
   images.value = Array.from(target.files)
-    .filter((file: File) => file.size < 3000000)
+    .filter((file: File) => file.size < 5000000)
     .map((file: File, index: number) => {
       const newName = `${new Date().toISOString()}_${index + 1}.jpg`;
       const fileWithNewName = new File([file], newName, { type: file.type });

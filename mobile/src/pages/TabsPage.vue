@@ -14,6 +14,9 @@
               <input type="file" @change="handleFileChange" />
               <button @click="compareImage">Comparar Imagem</button>
             </div>
+            <div v-for="(photo, index) in photos" :key="index">
+              <img :src="photo.image_url" alt="Imagem" style="width: 200px; height: 200px; margin: 10px" />
+            </div>
           </ion-content>
         </ion-tab>
 
@@ -66,6 +69,7 @@ import { ref } from "vue";
 const globalStore = useGlobalStore();
 
 const selectedFile = ref();
+const photos = ref<any[]>([]);
 
 const handleFileChange = (event: any) => {
   const file = event.target.files[0]; // Pega o primeiro arquivo da lista
@@ -87,8 +91,9 @@ const compareImage = () => {
     const base64Image = reader.result.split(",")[1]; // Remove o prefixo "data:image/jpeg;base64,"
 
     try {
-      const similarFaces = await similar(base64Image); // Chama a função similar passando o base64
-      console.log("Faces similares:", similarFaces); // Aqui você pode processar os resultados
+      const { similar_faces } = await similar(base64Image); // Chama a função similar passando o base64
+      photos.value = similar_faces; // Atualiza a lista de fotos
+      console.log(photos.value);
     } catch (error) {
       console.error("Erro ao comparar a imagem:", error);
     }

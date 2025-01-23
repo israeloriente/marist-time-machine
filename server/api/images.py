@@ -15,8 +15,7 @@ class ImageRequest(BaseModel):
 @router.post("/add-embedding/")
 async def list_images():
     try:
-        files = process_images()
-        return {"files": files}
+        process_images()
     except Exception as err:
         raise HTTPException(status_code=400, detail=f"Error listing files: {err}")
 
