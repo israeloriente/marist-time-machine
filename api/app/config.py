@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     cluster_max_distance: float = Field(default=0.5, alias="CLUSTER_MAX_DISTANCE")
     cluster_min_faces: int = Field(default=3, alias="CLUSTER_MIN_FACES")
 
+    # Nightly recluster: cron expression in UTC. Default 03:00 UTC = 00:00 BR.
+    # Set RECLUSTER_CRON="" to disable the scheduled job (still callable via API).
+    recluster_cron: str = Field(default="0 3 * * *", alias="RECLUSTER_CRON")
+
     # Stored as raw string; expose .cors_origins_list to consumers.
     cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
 

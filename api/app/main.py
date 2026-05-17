@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from . import scheduler
 from .config import settings
 from .db import close_pool, get_pool
 from .routers import people, photos, search
@@ -11,7 +12,9 @@ from .routers import people, photos, search
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     await get_pool()
+    scheduler.start()
     yield
+    scheduler.stop()
     await close_pool()
 
 

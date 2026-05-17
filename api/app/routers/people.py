@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .. import db
+from .. import scheduler
 from ..deps import CurrentUser, User
 from ..services.clustering import recluster_all, stats as clustering_stats
 
@@ -104,6 +105,15 @@ async def get_stats(_user: User = CurrentUser) -> dict:
 async def recluster(reset: bool = True, _user: User = CurrentUser) -> dict:
     """Re-run DBSCAN globally. If reset=true, wipes existing clusters first."""
     return await recluster_all(reset=reset)
+
+
+@router.get("/recluster/status")
+async def recluster_status(_user: User = CurrentUser) -> dict:
+    """Show last scheduled recluster result + next scheduled run."""
+    return {
+        "next_run_at": scheduler.next_run_iso(),
+        "last": scheduler.last_result() or None,
+    }
 
 
 @router.get("/{person_id}/photos")

@@ -15,6 +15,7 @@ dependencies = [
     "supabase>=2.9",
     "pgvector>=0.3.6",
     "orjson>=3.10",
+    "apscheduler>=3.10.4",
 ]
 
 [tool.uv]
