@@ -1,48 +1,274 @@
-version: "3"
+# =====================================================================
+# Marist Time Machine — production-ready compose
+# Works locally AND on Coolify. Coolify injects env vars and manages
+# Traefik/TLS automatically — no proxy is defined here on purpose.
+#
+# Stack (mirrors Immich's internal stack):
+#   db        : Postgres 17 + pgvector (also serves Supabase Auth/Storage)
+#   kong      : Supabase API gateway (auth, REST, storage)
+#   auth      : Supabase GoTrue (JWT issuer)
+#   rest      : PostgREST (auto REST over schema)
+#   storage   : Supabase Storage API (replaces MinIO)
+#   imgproxy  : Image transformations for Storage
+#   meta      : Supabase Postgres Meta
+#   studio    : Supabase Studio dashboard (admin UI)
+#   ml        : InsightFace ONNX face recognition service
+#   api       : FastAPI business backend (validates Supabase JWT)
+#   web       : Vue 3 + Vite PWA, served by nginx
+# =====================================================================
+
+name: marist-time-machine
+
+x-default-restart: &default-restart
+  restart: unless-stopped
+
 services:
-  etcd:
-    container_name: milvus-etcd
-    image: quay.io/coreos/etcd:v3.5.0
+  # -------------------------------------------------------------------
+  # Postgres (Supabase image: includes pgvector + supabase extensions)
+  # -------------------------------------------------------------------
+  db:
+    image: supabase/postgres:15.14.1.122
+    <<: *default-restart
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "postgres", "-h", "localhost"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     environment:
-      - ETCD_AUTO_COMPACTION_MODE=revision
-      - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
-      - ETCD_SNAPSHOT_COUNT=50000
+      POSTGRES_HOST: /var/run/postgresql
+      POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+      POSTGRES_DB: ${POSTGRES_DB:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXP: ${JWT_EXPIRY:-3600}
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/etcd:/etcd
-    command: etcd -advertise-client-urls=http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+      - db-data:/var/lib/postgresql/data
+      - ./supabase/migrations:/docker-entrypoint-initdb.d/migrations:ro
+      - ./supabase/init:/docker-entrypoint-initdb.d/init:ro
+    command:
+      - postgres
+      - -c
+      - config_file=/etc/postgresql/postgresql.conf
+      - -c
+      - log_min_messages=fatal
 
-  minio:
-    image: minio/minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    command: server /data --console-address ":9001" --address ":9000"
-    volumes:
-      - minio_data:/data
-
-  standalone:
-    container_name: milvus-standalone
-    image: milvusdb/milvus:v2.5.0
-    command: ["milvus", "run", "standalone"]
-    environment:
-      ETCD_ENDPOINTS: etcd:2379
-      MINIO_ADDRESS: minio:9000
-    volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/milvus:/var/lib/milvus
-    ports:
-      - "19530:19530"
-      - "9091:9091"
+  # -------------------------------------------------------------------
+  # Supabase Auth (GoTrue) — emits JWTs validated by `api`
+  # -------------------------------------------------------------------
+  auth:
+    image: supabase/gotrue:v2.189.0
+    <<: *default-restart
     depends_on:
-      - "etcd"
-      - "minio"
+      db:
+        condition: service_healthy
+    environment:
+      GOTRUE_API_HOST: 0.0.0.0
+      GOTRUE_API_PORT: 9999
+      API_EXTERNAL_URL: ${API_EXTERNAL_URL}
+      GOTRUE_DB_DRIVER: postgres
+      GOTRUE_DB_DATABASE_URL: postgres://supabase_auth_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-postgres}
+      GOTRUE_SITE_URL: ${SITE_URL}
+      GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST}
+      GOTRUE_JWT_SECRET: ${JWT_SECRET}
+      GOTRUE_JWT_EXP: ${JWT_EXPIRY:-3600}
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: authenticated
+      GOTRUE_DISABLE_SIGNUP: "false"
+      GOTRUE_EXTERNAL_EMAIL_ENABLED: "true"
+      GOTRUE_MAILER_AUTOCONFIRM: "true"
 
-networks:
-  default:
-    name: milvus
+  # -------------------------------------------------------------------
+  # PostgREST — auto REST API over our public schema
+  # -------------------------------------------------------------------
+  rest:
+    image: postgrest/postgrest:v12.2.12
+    <<: *default-restart
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-postgres}
+      PGRST_DB_SCHEMAS: public,storage
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+
+  # -------------------------------------------------------------------
+  # Supabase Storage API (replaces MinIO)
+  # -------------------------------------------------------------------
+  storage:
+    image: supabase/storage-api:v1.58.20
+    <<: *default-restart
+    depends_on:
+      db:
+        condition: service_healthy
+      rest:
+        condition: service_started
+    environment:
+      ANON_KEY: ${ANON_KEY}
+      SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      POSTGREST_URL: http://rest:3000
+      PGRST_JWT_SECRET: ${JWT_SECRET}
+      DATABASE_URL: postgres://supabase_storage_admin:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-postgres}
+      FILE_SIZE_LIMIT: ${FILE_SIZE_LIMIT:-52428800}
+      # Storage backend: "file" (dev, uses volume) or "s3" (prod, Hetzner Object Storage)
+      STORAGE_BACKEND: ${STORAGE_BACKEND:-file}
+      FILE_STORAGE_BACKEND_PATH: /var/lib/storage
+      # S3 settings (used when STORAGE_BACKEND=s3). For Hetzner: path-style endpoint.
+      TENANT_ID: ${S3_TENANT_ID:-stub}
+      REGION: ${S3_REGION:-stub}
+      GLOBAL_S3_BUCKET: ${S3_BUCKET:-stub}
+      GLOBAL_S3_ENDPOINT: ${S3_ENDPOINT:-}
+      GLOBAL_S3_FORCE_PATH_STYLE: ${S3_FORCE_PATH_STYLE:-true}
+      GLOBAL_S3_PROTOCOL: ${S3_PROTOCOL:-https}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-}
+      AWS_DEFAULT_REGION: ${S3_REGION:-stub}
+      ENABLE_IMAGE_TRANSFORMATION: "true"
+      IMGPROXY_URL: http://imgproxy:5001
+    volumes:
+      - storage-data:/var/lib/storage
+
+  imgproxy:
+    image: darthsim/imgproxy:v3.8.0
+    <<: *default-restart
+    environment:
+      IMGPROXY_BIND: ":5001"
+      IMGPROXY_LOCAL_FILESYSTEM_ROOT: /
+      IMGPROXY_USE_ETAG: "true"
+      IMGPROXY_ENABLE_WEBP_DETECTION: "true"
+      # When STORAGE_BACKEND=s3, also let imgproxy fetch from S3 directly
+      IMGPROXY_USE_S3: ${IMGPROXY_USE_S3:-false}
+      IMGPROXY_S3_ENDPOINT: ${S3_ENDPOINT:-}
+      IMGPROXY_S3_REGION: ${S3_REGION:-}
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-}
+    volumes:
+      - storage-data:/var/lib/storage:ro
+
+  # -------------------------------------------------------------------
+  # Supabase Meta + Studio (admin UI)
+  # -------------------------------------------------------------------
+  meta:
+    image: supabase/postgres-meta:v0.96.6
+    <<: *default-restart
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: ${POSTGRES_DB:-postgres}
+      PG_META_DB_USER: supabase_admin
+      PG_META_DB_PASSWORD: ${POSTGRES_PASSWORD}
+
+  studio:
+    image: supabase/studio:2025.12.08-sha-0399beb
+    <<: *default-restart
+    depends_on:
+      meta:
+        condition: service_started
+    environment:
+      STUDIO_PG_META_URL: http://meta:8080
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      DEFAULT_ORGANIZATION_NAME: Marist
+      DEFAULT_PROJECT_NAME: TimeMachine
+      SUPABASE_URL: ${SUPABASE_URL:-http://kong:8000}
+      SUPABASE_PUBLIC_URL: ${SUPABASE_PUBLIC_URL}
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      AUTH_JWT_SECRET: ${JWT_SECRET}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+
+  # -------------------------------------------------------------------
+  # Kong — Supabase API gateway
+  # -------------------------------------------------------------------
+  kong:
+    image: kong:2.8.1
+    <<: *default-restart
+    depends_on:
+      - auth
+      - rest
+      - storage
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /var/lib/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,basic-auth
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      SUPABASE_ANON_KEY: ${ANON_KEY}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      DASHBOARD_USERNAME: ${DASHBOARD_USERNAME}
+      DASHBOARD_PASSWORD: ${DASHBOARD_PASSWORD}
+    volumes:
+      - ./supabase/kong/kong.yml:/var/lib/kong/kong.yml:ro
+
+  # -------------------------------------------------------------------
+  # ML — InsightFace ONNX (SCRFD + ArcFace buffalo_l)
+  # -------------------------------------------------------------------
+  ml:
+    build:
+      context: ./ml
+      dockerfile: Dockerfile
+    <<: *default-restart
+    environment:
+      ML_HOST: ${ML_HOST:-0.0.0.0}
+      ML_PORT: ${ML_PORT:-8081}
+      ML_MODEL_NAME: ${ML_MODEL_NAME:-buffalo_l}
+      ML_DET_THRESHOLD: ${ML_DET_THRESHOLD:-0.7}
+      ML_DET_SIZE: ${ML_DET_SIZE:-640}
+    volumes:
+      - ml-models:/root/.insightface
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8081/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # -------------------------------------------------------------------
+  # API — FastAPI business backend
+  # -------------------------------------------------------------------
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile
+    <<: *default-restart
+    depends_on:
+      db:
+        condition: service_healthy
+      ml:
+        condition: service_started
+      auth:
+        condition: service_started
+    environment:
+      API_HOST: ${API_HOST:-0.0.0.0}
+      API_PORT: ${API_PORT:-8080}
+      DATABASE_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-postgres}
+      JWT_SECRET: ${JWT_SECRET}
+      SUPABASE_URL: ${SUPABASE_URL:-http://kong:8000}
+      SUPABASE_SERVICE_KEY: ${SERVICE_ROLE_KEY}
+      ML_INTERNAL_URL: ${ML_INTERNAL_URL:-http://ml:8081}
+      CLUSTER_MAX_DISTANCE: ${CLUSTER_MAX_DISTANCE:-0.5}
+      CLUSTER_MIN_FACES: ${CLUSTER_MIN_FACES:-3}
+
+  # -------------------------------------------------------------------
+  # Web — Vue 3 + Vite PWA built and served by nginx
+  # -------------------------------------------------------------------
+  web:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+      args:
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_API_URL: ${VITE_API_URL}
+    <<: *default-restart
 
 volumes:
-  minio_data:
+  db-data:
+  storage-data:
+  ml-models:

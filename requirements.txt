@@ -1,9 +1,0 @@
-fastapi
-uvicorn
-minio
-python-dotenv
-python-multipart
-pymongo
-python-jose
-bcrypt
-passlib

@@ -169,4 +169,45 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Docker runtime / volumes
 volumes/
+data/
+storage/
+
+# Node / Vite
+node_modules/
+dist/
+dist-ssr/
+.vite/
+*.local
+.eslintcache
+
+# Environments
+.env.local
+.env.*.local
+!.env.example
+
+# IDE
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+
+# ML models cache (InsightFace pesos ONNX ~250MB)
+ml/models_cache/
+*.onnx
+
+# Supabase CLI temp
+supabase/.branches
+supabase/.temp
+
+scripts/.coolify.env
