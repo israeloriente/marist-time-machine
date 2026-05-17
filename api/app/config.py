@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,13 @@ class Settings(BaseSettings):
     cluster_min_faces: int = Field(default=3, alias="CLUSTER_MIN_FACES")
 
     cors_origins: list[str] = Field(default_factory=lambda: ["*"], alias="CORS_ORIGINS")
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def _split_cors(cls, v):
+        if isinstance(v, str):
+            return [s.strip() for s in v.split(",") if s.strip()]
+        return v
 
 
 @lru_cache
