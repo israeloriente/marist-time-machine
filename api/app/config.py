@@ -11,6 +11,9 @@ class Settings(BaseSettings):
     jwt_secret: str = Field(alias="JWT_SECRET")
 
     supabase_url: str = Field(default="http://kong:8000", alias="SUPABASE_URL")
+    # Public URL of Supabase (used in signed URLs returned to the browser).
+    # Falls back to supabase_url if not set.
+    supabase_public_url: str = Field(default="", alias="SUPABASE_PUBLIC_URL")
     supabase_service_key: str = Field(alias="SUPABASE_SERVICE_KEY")
 
     ml_internal_url: str = Field(default="http://ml:8081", alias="ML_INTERNAL_URL")

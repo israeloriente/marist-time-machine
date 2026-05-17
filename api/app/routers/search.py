@@ -6,6 +6,7 @@ person cluster -> return every photo where that person appears.
 
 from __future__ import annotations
 
+import logging
 from uuid import UUID
 
 import numpy as np
@@ -18,6 +19,7 @@ from ..deps import CurrentUser, User
 from ..services import storage
 from ..services.ml_client import ml_client
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/search", tags=["search"])
 
 
@@ -52,7 +54,21 @@ async def search_by_face(
     # Use the highest-scoring face as the query
     faces.sort(key=lambda f: f["detection_score"], reverse=True)
     query = np.array(faces[0]["embedding"], dtype=np.float32)
-    max_distance = settings().cluster_max_distance
+    # Clustering threshold is tighter than search threshold. Use a wider
+    # window for retrieval (still constrained by the cosine distance).
+    search_distance = max(settings().cluster_max_distance, 0.65)
+
+    # Debug: log the top 5 distances from the query for diagnostics.
+    top = await db.fetch(
+        "select id, person_id, embedding <=> $1 as distance from public.faces order by distance asc limit 5",
+        query,
+    )
+    logger.info(
+        "search: query detection_score=%.3f | search_distance=%.2f | top5_distances=%s",
+        faces[0]["detection_score"],
+        search_distance,
+        [round(float(r["distance"]), 3) for r in top],
+    )
 
     nearest = await db.fetchrow(
         """
@@ -63,7 +79,7 @@ async def search_by_face(
         limit 1
         """,
         query,
-        max_distance,
+        search_distance,
     )
 
     if nearest is None:
@@ -82,7 +98,7 @@ async def search_by_face(
         )
         photos = []
         for r in raw:
-            if r["distance"] > max_distance:
+            if r["distance"] > search_distance:
                 continue
             url = storage.signed_url(r["storage_bucket"], r["storage_path"])
             photos.append(
@@ -101,14 +117,13 @@ async def search_by_face(
 
     rows = await db.fetch(
         """
-        select distinct on (ph.id)
-               ph.id as photo_id, ph.storage_bucket, ph.storage_path, ph.uploaded_at,
+        select ph.id as photo_id, ph.storage_bucket, ph.storage_path, ph.uploaded_at,
                min(f.embedding <=> $1) as distance
         from public.faces f
         join public.photos ph on ph.id = f.photo_id
         where f.person_id = $2
-        group by ph.id
-        order by ph.id, distance asc
+        group by ph.id, ph.storage_bucket, ph.storage_path, ph.uploaded_at
+        order by distance asc
         limit $3
         """,
         query,
