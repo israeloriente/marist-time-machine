@@ -11,8 +11,9 @@ const auth = useAuthStore();
     <p class="muted">
       Tire uma selfie e a gente encontra todas as suas fotos no acervo Marista.
     </p>
-    <div style="margin-top: 1.5rem; display: flex; gap: 0.75rem;">
+    <div style="margin-top: 1.5rem; display: flex; gap: 0.75rem; flex-wrap: wrap;">
       <RouterLink v-if="auth.session" to="/capture" class="button">Buscar agora</RouterLink>
+      <RouterLink v-if="auth.session" to="/upload" class="button secondary">Adicionar fotos</RouterLink>
       <RouterLink v-else to="/login" class="button">Entrar para buscar</RouterLink>
     </div>
   </section>
