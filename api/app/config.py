@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -18,14 +18,12 @@ class Settings(BaseSettings):
     cluster_max_distance: float = Field(default=0.5, alias="CLUSTER_MAX_DISTANCE")
     cluster_min_faces: int = Field(default=3, alias="CLUSTER_MIN_FACES")
 
-    cors_origins: list[str] = Field(default_factory=lambda: ["*"], alias="CORS_ORIGINS")
+    # Stored as raw string; expose .cors_origins_list to consumers.
+    cors_origins: str = Field(default="*", alias="CORS_ORIGINS")
 
-    @field_validator("cors_origins", mode="before")
-    @classmethod
-    def _split_cors(cls, v):
-        if isinstance(v, str):
-            return [s.strip() for s in v.split(",") if s.strip()]
-        return v
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [s.strip() for s in self.cors_origins.split(",") if s.strip()] or ["*"]
 
 
 @lru_cache
