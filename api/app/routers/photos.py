@@ -80,7 +80,7 @@ async def upload_photo(
         path,
         safe_name,
         UUID(user.id),
-        json.dumps(metadata),
+        metadata,
     )
     assert photo_row is not None
     photo_id = photo_row["id"]
@@ -116,8 +116,8 @@ async def upload_photo(
             returning id
             """,
             photo_id,
-            json.dumps(f["bbox"]),
-            json.dumps(f["landmarks"]),
+            f["bbox"],
+            f["landmarks"],
             f["detection_score"],
             emb,
         )
