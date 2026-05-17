@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from .. import db
 from ..deps import CurrentUser, User
-from ..services import storage
+from ..services import storage, video
 from ..services.clustering import assign_face_to_person
 from ..services.ml_client import ml_client
 
@@ -40,9 +40,15 @@ async def upload_photo(
     metadata_json: str = Form("{}"),
     user: User = CurrentUser,
 ) -> PhotoOut:
-    """Upload a photo to storage, run face analysis, persist faces, cluster."""
-    if not file.content_type or not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=415, detail="must be an image")
+    """Upload an image or video to storage, run face analysis, persist faces, cluster.
+
+    Videos: a single representative frame is extracted via ffmpeg (mirrors Immich).
+    """
+    ctype = (file.content_type or "").lower()
+    is_video = ctype.startswith("video/")
+    is_image = ctype.startswith("image/")
+    if not (is_image or is_video):
+        raise HTTPException(status_code=415, detail="must be an image or video")
 
     try:
         metadata = json.loads(metadata_json)
@@ -53,13 +59,15 @@ async def upload_photo(
     if not payload:
         raise HTTPException(status_code=400, detail="empty file")
 
-    # 1. Persist to Supabase Storage
-    safe_name = file.filename or "upload.jpg"
-    path = f"{user.id}/{UUID(int=0).hex[:0]}{safe_name}"  # simple per-user prefix
+    metadata["media_type"] = "video" if is_video else "image"
+
+    # 1. Persist original to Supabase Storage
+    safe_name = file.filename or ("upload.mp4" if is_video else "upload.jpg")
+    path = f"{user.id}/{safe_name}"
     storage.storage_client().storage.from_("photos").upload(
         path,
         payload,
-        {"content-type": file.content_type, "upsert": "true"},
+        {"content-type": file.content_type or "application/octet-stream", "upsert": "true"},
     )
 
     # 2. Insert photo row
@@ -77,8 +85,26 @@ async def upload_photo(
     assert photo_row is not None
     photo_id = photo_row["id"]
 
-    # 3. Detect + embed
-    faces = await ml_client().analyze(payload, safe_name)
+    # 3. For videos, extract a thumbnail frame first; then detect + embed
+    frame_bytes = payload
+    if is_video:
+        try:
+            frame_bytes = await video.extract_thumbnail(payload)
+        except Exception as exc:
+            await db.execute(
+                "update public.photos set processing_error = $1 where id = $2",
+                f"thumbnail extraction failed: {exc}",
+                photo_id,
+            )
+            return PhotoOut(
+                id=photo_id,
+                storage_path=photo_row["storage_path"],
+                storage_bucket=photo_row["storage_bucket"],
+                uploaded_at=photo_row["uploaded_at"].isoformat(),
+                metadata=photo_row["metadata"],
+                faces=[],
+            )
+    faces = await ml_client().analyze(frame_bytes, safe_name)
 
     inserted_faces: list[FaceOut] = []
     for f in faces:

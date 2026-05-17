@@ -36,10 +36,29 @@ export async function searchByFace(file: Blob): Promise<SearchResponse> {
   return data;
 }
 
-export async function uploadPhoto(file: File, metadata: Record<string, unknown> = {}) {
+export interface UploadResponse {
+  id: string;
+  storage_path: string;
+  storage_bucket: string;
+  uploaded_at: string;
+  metadata: Record<string, unknown>;
+  faces: Array<{
+    id: string;
+    person_id: string | null;
+    bbox: number[];
+    detection_score: number;
+  }>;
+}
+
+export async function uploadPhoto(
+  file: File,
+  metadata: Record<string, unknown> = {},
+): Promise<UploadResponse> {
   const form = new FormData();
   form.append("file", file);
   form.append("metadata_json", JSON.stringify(metadata));
-  const { data } = await api.post("/photos", form);
+  const { data } = await api.post<UploadResponse>("/photos", form, {
+    timeout: 5 * 60 * 1000, // videos can take a while
+  });
   return data;
 }

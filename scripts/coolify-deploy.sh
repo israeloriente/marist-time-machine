@@ -95,7 +95,7 @@ print(json.dumps({
   "git_repository": "$GIT_REPO",
   "git_branch": "$GIT_BRANCH",
   "build_pack": "dockercompose",
-  "docker_compose_location": "docker-compose.coolify.yml",
+  "docker_compose_location": "/docker-compose.coolify.yml",
   "name": "$APP_NAME",
   "instant_deploy": False
 }))
@@ -135,8 +135,9 @@ keys = [
   "CLUSTER_MAX_DISTANCE",
   "CLUSTER_MIN_FACES",
   "CORS_ORIGINS",
-  "SERVICE_FQDN_WEB",
-  "SERVICE_FQDN_API",
+  "SERVICE_FQDN_WEB_80",
+  "SERVICE_FQDN_API_8080",
+  "VITE_API_URL",
 ]
 data = []
 for k in keys:

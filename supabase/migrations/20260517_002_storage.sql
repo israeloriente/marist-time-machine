@@ -4,7 +4,10 @@
 
 insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
 values
-  ('photos',     'photos',     false, 52428800, array['image/jpeg','image/png','image/webp','image/heic']),
+  ('photos',     'photos',     false, 524288000, array[
+      'image/jpeg','image/png','image/webp','image/heic',
+      'video/mp4','video/quicktime','video/webm','video/x-matroska'
+  ]),
   ('thumbnails', 'thumbnails', true,   5242880, array['image/jpeg','image/webp'])
 on conflict (id) do nothing;
 
