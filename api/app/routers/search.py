@@ -64,23 +64,38 @@ async def search_by_face(
         query,
     )
     logger.info(
-        "search: query detection_score=%.3f | search_distance=%.2f | top5_distances=%s",
+        "search: query det_score=%.3f | search_distance=%.2f | top5_distances=%s | top5_person_ids=%s",
         faces[0]["detection_score"],
         search_distance,
         [round(float(r["distance"]), 3) for r in top],
+        [str(r["person_id"]) if r["person_id"] else None for r in top],
     )
 
-    nearest = await db.fetchrow(
+    # Rank candidate people by aggregating top-K nearest *labeled* faces.
+    # This is more robust than matching against a single nearest face:
+    # a person with 10 stored faces wins over a noisy isolated rough match.
+    candidate_rows = await db.fetch(
         """
-        select person_id, embedding <=> $1 as distance
-        from public.faces
-        where person_id is not null and embedding <=> $1 <= $2
-        order by distance asc
+        with nearest as (
+          select person_id, embedding <=> $1 as distance
+          from public.faces
+          where person_id is not null and embedding <=> $1 <= $2
+          order by distance asc
+          limit 50
+        )
+        select person_id,
+               count(*) as hits,
+               min(distance) as best,
+               avg(distance) as avg_dist
+        from nearest
+        group by person_id
+        order by hits desc, best asc
         limit 1
         """,
         query,
         search_distance,
     )
+    nearest = candidate_rows[0] if candidate_rows else None
 
     if nearest is None:
         # Fall back to raw face-to-face matches if no clustered person within range

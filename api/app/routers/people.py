@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from .. import db
 from ..deps import CurrentUser, User
+from ..services.clustering import recluster_all, stats as clustering_stats
 
 router = APIRouter(prefix="/people", tags=["people"])
 
@@ -91,6 +92,18 @@ async def merge_people(body: MergeRequest, _user: User = CurrentUser) -> dict:
     )
     await db.execute("delete from public.people where id = $1", body.source_id)
     return {"ok": True}
+
+
+@router.get("/stats")
+async def get_stats(_user: User = CurrentUser) -> dict:
+    """Return how many faces are clustered, total, and how many people exist."""
+    return await clustering_stats()
+
+
+@router.post("/recluster")
+async def recluster(reset: bool = True, _user: User = CurrentUser) -> dict:
+    """Re-run DBSCAN globally. If reset=true, wipes existing clusters first."""
+    return await recluster_all(reset=reset)
 
 
 @router.get("/{person_id}/photos")
