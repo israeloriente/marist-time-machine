@@ -7,10 +7,14 @@ interface QueuedFile {
   file: File;
   preview: string;
   kind: "image" | "video";
-  status: "pending" | "uploading" | "done" | "error";
+  status: "pending" | "uploading" | "processing" | "done" | "error";
+  uploadPct: number;     // 0-100 (bytes sent)
   message?: string;
   facesFound?: number;
+  abort?: AbortController;
 }
+
+const PARALLEL = 3; // simultaneous uploads
 
 const currentYear = new Date().getFullYear();
 const graduationYears = Array.from({ length: 111 }, (_, i) => currentYear + 10 - i);
@@ -32,8 +36,24 @@ const canSubmit = computed(
     classLetter.value !== "",
 );
 
-const doneCount = computed(() => queue.value.filter((q) => q.status === "done").length);
-const errorCount = computed(() => queue.value.filter((q) => q.status === "error").length);
+const stats = computed(() => ({
+  total: queue.value.length,
+  pending: queue.value.filter((q) => q.status === "pending").length,
+  done: queue.value.filter((q) => q.status === "done").length,
+  err: queue.value.filter((q) => q.status === "error").length,
+  active: queue.value.filter((q) => q.status === "uploading" || q.status === "processing").length,
+}));
+
+const overallPct = computed(() => {
+  if (!queue.value.length) return 0;
+  const sum = queue.value.reduce((acc, q) => {
+    if (q.status === "done") return acc + 100;
+    if (q.status === "error") return acc + 100;
+    if (q.status === "processing") return acc + 100; // bytes sent, server-side now
+    return acc + q.uploadPct;
+  }, 0);
+  return Math.round(sum / queue.value.length);
+});
 
 function addFiles(files: FileList | File[]) {
   for (const file of Array.from(files)) {
@@ -49,6 +69,7 @@ function addFiles(files: FileList | File[]) {
       preview: URL.createObjectURL(file),
       kind,
       status: "pending",
+      uploadPct: 0,
     });
   }
 }
@@ -67,52 +88,89 @@ function onDrop(evt: DragEvent) {
 
 function removeItem(id: string) {
   const idx = queue.value.findIndex((q) => q.id === id);
-  if (idx >= 0) {
-    URL.revokeObjectURL(queue.value[idx].preview);
-    queue.value.splice(idx, 1);
-  }
+  if (idx < 0) return;
+  const item = queue.value[idx];
+  item.abort?.abort();
+  URL.revokeObjectURL(item.preview);
+  queue.value.splice(idx, 1);
 }
 
 function clearDone() {
   queue.value = queue.value.filter((q) => q.status !== "done");
 }
 
-async function uploadAll() {
-  busy.value = true;
-  const metadata = {
-    graduation_year: graduationYear.value,
-    class: classLetter.value,
-  };
-
-  for (const item of queue.value) {
-    if (item.status !== "pending") continue;
-    item.status = "uploading";
-    try {
-      const res = await uploadPhoto(item.file, metadata);
-      item.status = "done";
-      item.facesFound = res?.faces?.length ?? 0;
-      item.message =
-        item.facesFound === 0
-          ? "nenhum rosto detectado"
-          : `${item.facesFound} ${item.facesFound === 1 ? "rosto" : "rostos"} detectados`;
-    } catch (e: any) {
+async function processOne(item: QueuedFile) {
+  item.status = "uploading";
+  item.uploadPct = 0;
+  item.abort = new AbortController();
+  try {
+    const res = await uploadPhoto(
+      item.file,
+      { graduation_year: graduationYear.value, class: classLetter.value },
+      {
+        onUploadProgress: (pct) => {
+          item.uploadPct = pct;
+          if (pct >= 100) item.status = "processing";
+        },
+        signal: item.abort.signal,
+      },
+    );
+    item.status = "done";
+    item.uploadPct = 100;
+    item.facesFound = res?.faces?.length ?? 0;
+    item.message =
+      item.facesFound === 0
+        ? "nenhum rosto detectado"
+        : `${item.facesFound} ${item.facesFound === 1 ? "rosto" : "rostos"} detectados`;
+  } catch (e: any) {
+    if (item.abort?.signal.aborted) {
+      item.status = "error";
+      item.message = "cancelado";
+    } else {
       item.status = "error";
       item.message = e.response?.data?.detail ?? e.message ?? String(e);
     }
+  } finally {
+    item.abort = undefined;
   }
+}
+
+async function uploadAll() {
+  busy.value = true;
+
+  // Pool: keep PARALLEL concurrent uploads going until queue drains.
+  const pending = () => queue.value.filter((q) => q.status === "pending");
+  const inflight = new Set<Promise<void>>();
+
+  while (true) {
+    const next = pending().slice(0, PARALLEL - inflight.size);
+    if (!next.length && !inflight.size) break;
+    for (const item of next) {
+      const p = processOne(item).finally(() => inflight.delete(p));
+      inflight.add(p);
+    }
+    if (inflight.size) await Promise.race(inflight);
+  }
+
   busy.value = false;
+}
+
+function cancelAll() {
+  for (const q of queue.value) {
+    if (q.status === "uploading" || q.status === "processing") q.abort?.abort();
+  }
 }
 </script>
 
 <template>
   <section class="card">
     <h2>Adicionar ao acervo</h2>
-    <p class="muted">
+    <p class="muted hide-on-mobile">
       Envie fotos ou vídeos. Para vídeos, um frame representativo é processado
       pra reconhecimento facial.
     </p>
 
-    <!-- Metadata form -->
+    <!-- Metadata -->
     <div class="form-grid">
       <label>
         <span>Ano de formatura <em>*</em></span>
@@ -147,82 +205,110 @@ async function uploadAll() {
         hidden
         @change="onFilesPicked"
       />
-      <p>
-        <strong>Arraste fotos ou vídeos aqui</strong> ou clique para selecionar.<br />
-        <span class="muted">Aceita JPG, PNG, WebP, HEIC, MP4, MOV, WebM.</span>
-      </p>
+      <div class="dropzone-inner">
+        <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 13V3"/><path d="m7 8 5-5 5 5"/><path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6"/>
+        </svg>
+        <p>
+          <strong class="hide-on-mobile">Arraste fotos ou vídeos</strong>
+          <strong class="show-on-mobile">Toque para escolher</strong>
+          <span class="muted hide-on-mobile"> ou clique pra escolher</span>
+        </p>
+        <p class="muted small">JPG · PNG · WebP · HEIC · MP4 · MOV · WebM</p>
+      </div>
+    </div>
+
+    <!-- Overall progress -->
+    <div v-if="queue.length" class="overall">
+      <div class="overall-bar">
+        <div class="overall-fill" :style="{ width: overallPct + '%' }"></div>
+      </div>
+      <div class="overall-meta">
+        <span>{{ overallPct }}%</span>
+        <span class="muted">
+          {{ stats.done }}/{{ stats.total }} concluídas
+          <span v-if="stats.err" class="error">· {{ stats.err }} erro</span>
+        </span>
+      </div>
     </div>
 
     <!-- Queue -->
-    <div v-if="queue.length" style="margin-top: 1.25rem">
-      <div
-        style="
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 0.5rem;
-          margin-bottom: 0.75rem;
-        "
-      >
-        <p class="muted" style="margin: 0">
-          {{ queue.length }} {{ queue.length === 1 ? "arquivo" : "arquivos" }} na fila
-          <span v-if="doneCount">— ✓ {{ doneCount }} enviados</span>
-          <span v-if="errorCount" class="error"> — ✗ {{ errorCount }} com erro</span>
-        </p>
-        <button v-if="doneCount" class="button secondary" type="button" @click="clearDone">
-          Limpar enviados
-        </button>
-      </div>
-
-      <ul class="queue-list">
-        <li v-for="q in queue" :key="q.id" :class="['queue-item', q.status]">
-          <div class="thumb">
-            <img v-if="q.kind === 'image'" :src="q.preview" alt="" />
-            <video v-else :src="q.preview" muted />
-            <span class="badge">{{ q.kind === "video" ? "vídeo" : "foto" }}</span>
+    <ul v-if="queue.length" class="queue-list">
+      <li v-for="q in queue" :key="q.id" :class="['queue-item', q.status]">
+        <div class="thumb">
+          <img v-if="q.kind === 'image'" :src="q.preview" alt="" />
+          <video v-else :src="q.preview" muted playsinline preload="metadata" />
+          <span class="badge">{{ q.kind === "video" ? "vídeo" : "foto" }}</span>
+        </div>
+        <div class="info">
+          <div class="row">
+            <strong class="filename">{{ q.file.name }}</strong>
+            <button
+              v-if="q.status === 'pending' || q.status === 'uploading' || q.status === 'processing'"
+              type="button"
+              class="remove"
+              :aria-label="q.status === 'pending' ? 'remover' : 'cancelar'"
+              @click="removeItem(q.id)"
+            >✕</button>
           </div>
-          <div class="info">
-            <strong>{{ q.file.name }}</strong>
-            <span class="muted">{{ (q.file.size / 1024 / 1024).toFixed(1) }} MB</span>
-            <span v-if="q.status === 'uploading'">Enviando…</span>
-            <span v-if="q.status === 'done'">✓ {{ q.message }}</span>
-            <span v-if="q.status === 'error'" class="error">✗ {{ q.message }}</span>
-          </div>
-          <button
-            v-if="q.status === 'pending'"
-            type="button"
-            class="remove"
-            @click="removeItem(q.id)"
-            aria-label="remover"
-          >
-            ✕
-          </button>
-        </li>
-      </ul>
-    </div>
+          <span class="muted small">{{ (q.file.size / 1024 / 1024).toFixed(1) }} MB</span>
 
-    <div style="display: flex; gap: 0.75rem; margin-top: 1.25rem; flex-wrap: wrap">
+          <!-- Per-item progress bar -->
+          <div v-if="q.status !== 'done' && q.status !== 'error'" class="bar">
+            <div
+              class="bar-fill"
+              :class="{ indeterminate: q.status === 'processing' }"
+              :style="{ width: q.status === 'processing' ? '100%' : q.uploadPct + '%' }"
+            ></div>
+          </div>
+
+          <span class="status-text">
+            <template v-if="q.status === 'pending'">Aguardando…</template>
+            <template v-else-if="q.status === 'uploading'">{{ q.uploadPct }}%</template>
+            <template v-else-if="q.status === 'processing'">Analisando rostos…</template>
+            <template v-else-if="q.status === 'done'">✓ {{ q.message }}</template>
+            <template v-else-if="q.status === 'error'" class="error">✗ {{ q.message }}</template>
+          </span>
+        </div>
+      </li>
+    </ul>
+
+    <!-- Sticky action bar (mobile-friendly) -->
+    <div class="actions">
       <button class="button" :disabled="!canSubmit" @click="uploadAll">
-        {{ busy ? "Enviando..." : "Enviar todos" }}
+        <template v-if="busy">Enviando {{ stats.active }} de {{ stats.total }}…</template>
+        <template v-else>Enviar {{ stats.pending || "" }} {{ stats.pending === 1 ? "arquivo" : "arquivos" }}</template>
       </button>
       <button
-        v-if="!busy && queue.length"
-        class="button secondary"
+        v-if="busy"
         type="button"
-        @click="queue = []"
+        class="button secondary"
+        @click="cancelAll"
       >
-        Cancelar tudo
+        Cancelar
+      </button>
+      <button
+        v-else-if="stats.done"
+        type="button"
+        class="button secondary"
+        @click="clearDone"
+      >
+        Limpar enviados
       </button>
     </div>
   </section>
 </template>
 
 <style scoped>
+.card {
+  padding: 1rem;
+}
+
 .form-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  grid-template-columns: 1fr 1fr;
   gap: 0.75rem;
-  margin: 1rem 0 1.25rem;
+  margin: 1rem 0 1rem;
 }
 .form-grid label {
   display: flex;
@@ -239,36 +325,61 @@ async function uploadAll() {
 .dropzone {
   border: 2px dashed #2d4a82;
   border-radius: 12px;
-  padding: 2rem 1rem;
+  padding: 1.5rem 1rem;
   text-align: center;
   cursor: pointer;
-  transition:
-    background 0.2s,
-    border-color 0.2s;
+  transition: background 0.2s, border-color 0.2s;
   background: rgba(45, 74, 130, 0.08);
 }
-.dropzone:hover,
-.dropzone.over {
+.dropzone:hover, .dropzone.over {
   border-color: var(--accent);
   background: rgba(255, 211, 78, 0.08);
 }
-.dropzone p {
-  margin: 0;
+.dropzone-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
   color: var(--text);
+}
+.dropzone p { margin: 0; }
+.small { font-size: 0.8rem; }
+
+.overall {
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+.overall-bar {
+  height: 6px;
+  background: rgba(45, 74, 130, 0.4);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.overall-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), #ffb84e);
+  transition: width 0.3s ease;
+}
+.overall-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-top: 0.4rem;
+  font-size: 0.85rem;
 }
 
 .queue-list {
   list-style: none;
   padding: 0;
-  margin: 0;
+  margin: 0.75rem 0 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
 }
 .queue-item {
   display: flex;
-  align-items: center;
-  gap: 0.85rem;
+  align-items: stretch;
+  gap: 0.75rem;
   padding: 0.6rem;
   border-radius: 10px;
   background: rgba(11, 31, 58, 0.4);
@@ -278,51 +389,93 @@ async function uploadAll() {
   position: relative;
   width: 64px;
   height: 64px;
-  border-radius: 6px;
+  border-radius: 8px;
   overflow: hidden;
   background: #1a2c4e;
   flex-shrink: 0;
 }
-.thumb img,
-.thumb video {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+.thumb img, .thumb video {
+  width: 100%; height: 100%; object-fit: cover;
 }
 .thumb .badge {
-  position: absolute;
-  bottom: 2px;
-  right: 2px;
-  background: rgba(0, 0, 0, 0.7);
-  color: var(--accent);
-  font-size: 0.65rem;
-  padding: 1px 5px;
-  border-radius: 4px;
-  font-weight: 600;
+  position: absolute; bottom: 2px; right: 2px;
+  background: rgba(0,0,0,0.75); color: var(--accent);
+  font-size: 0.6rem; padding: 1px 5px; border-radius: 4px;
+  font-weight: 700; letter-spacing: 0.02em;
 }
-.queue-item .info {
+.info {
+  display: flex; flex-direction: column;
+  gap: 0.25rem; flex: 1; min-width: 0;
+}
+.info .row {
+  display: flex; justify-content: space-between;
+  align-items: center; gap: 0.5rem;
+}
+.filename {
+  overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; font-size: 0.9rem;
+}
+.bar {
+  height: 4px;
+  background: rgba(45,74,130,0.4);
+  border-radius: 99px;
+  overflow: hidden;
+  margin-top: 0.15rem;
+}
+.bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+.bar-fill.indeterminate {
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to   { background-position: -200% 0; }
+}
+.status-text { font-size: 0.8rem; color: var(--muted); }
+.queue-item.done .status-text { color: #4ade80; }
+.queue-item.done { border-color: rgba(74, 222, 128, 0.4); }
+.queue-item.error .status-text,
+.queue-item.error { border-color: rgba(255, 107, 107, 0.5); }
+.queue-item.error .status-text { color: var(--error); }
+.remove {
+  background: none; border: none;
+  color: var(--muted); cursor: pointer;
+  font-size: 1rem; padding: 4px 8px;
+  border-radius: 6px;
+}
+.remove:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+
+.actions {
+  position: sticky;
+  bottom: 0;
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  background: linear-gradient(to top, var(--bg) 65%, transparent);
   display: flex;
-  flex-direction: column;
-  gap: 0.15rem;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.actions .button {
   flex: 1;
   min-width: 0;
-}
-.queue-item .info strong {
-  overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
 }
-.queue-item.done {
-  border-color: rgba(0, 200, 100, 0.4);
-}
-.queue-item.error {
-  border-color: rgba(255, 107, 107, 0.4);
-}
-.remove {
-  background: none;
-  border: none;
-  cursor: pointer;
-  font-size: 1.2rem;
-  color: var(--muted);
+
+.show-on-mobile { display: inline; }
+.hide-on-mobile { display: none; }
+
+@media (min-width: 640px) {
+  .card { padding: 1.5rem; }
+  .form-grid { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+  .dropzone { padding: 2rem 1rem; }
+  .show-on-mobile { display: none; }
+  .hide-on-mobile { display: inline; }
+  .actions { position: static; background: none; }
+  .actions .button { flex: 0 0 auto; }
 }
 </style>

@@ -53,12 +53,18 @@ export interface UploadResponse {
 export async function uploadPhoto(
   file: File,
   metadata: Record<string, unknown> = {},
+  options: { onUploadProgress?: (pct: number) => void; signal?: AbortSignal } = {},
 ): Promise<UploadResponse> {
   const form = new FormData();
   form.append("file", file);
   form.append("metadata_json", JSON.stringify(metadata));
   const { data } = await api.post<UploadResponse>("/photos", form, {
-    timeout: 5 * 60 * 1000, // videos can take a while
+    timeout: 10 * 60 * 1000, // videos can take a while
+    signal: options.signal,
+    onUploadProgress: (evt) => {
+      if (!options.onUploadProgress || !evt.total) return;
+      options.onUploadProgress(Math.min(100, Math.round((evt.loaded / evt.total) * 100)));
+    },
   });
   return data;
 }

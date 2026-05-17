@@ -10,7 +10,8 @@ const auth = useAuthStore();
     <header class="topbar">
       <RouterLink to="/" class="brand">
         <span class="dot" />
-        Marist Time Machine
+        <span class="brand-full">Marist Time Machine</span>
+        <span class="brand-short">Time Machine</span>
       </RouterLink>
       <nav v-if="auth.session">
         <RouterLink to="/capture">Buscar</RouterLink>
