@@ -32,6 +32,8 @@ class CreateSuggestion(BaseModel):
     person_id: UUID | None = None
     face_id: UUID | None = None
     suggested_name: str = Field(min_length=2, max_length=200)
+    suggested_graduation_year: int | None = Field(default=None, ge=1900, le=2100)
+    suggested_class_letter: str | None = Field(default=None, pattern="^[A-Fa-f]$")
 
 
 class SuggestionOut(BaseModel):
@@ -40,6 +42,8 @@ class SuggestionOut(BaseModel):
     face_id: UUID | None
     suggested_name: str
     normalized_name: str
+    suggested_graduation_year: int | None = None
+    suggested_class_letter: str | None = None
     suggested_by: UUID | None
     status: str
     created_at: str
@@ -65,13 +69,16 @@ async def create_suggestion(body: CreateSuggestion, user: User = CurrentUser) ->
     name = body.suggested_name.strip()
     normalized = _normalize(name)
 
+    klass = body.suggested_class_letter.upper() if body.suggested_class_letter else None
     try:
         row = await db.fetchrow(
             """
             insert into public.name_suggestions
-              (person_id, face_id, suggested_name, normalized_name, suggested_by)
-            values ($1, $2, $3, $4, $5)
+              (person_id, face_id, suggested_name, normalized_name, suggested_by,
+               suggested_graduation_year, suggested_class_letter)
+            values ($1, $2, $3, $4, $5, $6, $7)
             returning id, person_id, face_id, suggested_name, normalized_name,
+                      suggested_graduation_year, suggested_class_letter,
                       suggested_by, status, created_at
             """,
             body.person_id,
@@ -79,6 +86,8 @@ async def create_suggestion(body: CreateSuggestion, user: User = CurrentUser) ->
             name,
             normalized,
             UUID(user.id),
+            body.suggested_graduation_year,
+            klass,
         )
     except Exception as exc:
         # Unique violation = same user already suggested this name for this target.
@@ -93,6 +102,8 @@ async def create_suggestion(body: CreateSuggestion, user: User = CurrentUser) ->
         face_id=row["face_id"],
         suggested_name=row["suggested_name"],
         normalized_name=row["normalized_name"],
+        suggested_graduation_year=row["suggested_graduation_year"],
+        suggested_class_letter=row["suggested_class_letter"],
         suggested_by=row["suggested_by"],
         status=row["status"],
         created_at=row["created_at"].isoformat(),
@@ -105,6 +116,8 @@ class GroupedSuggestion(BaseModel):
     face_id: UUID | None
     suggested_name: str         # most recent raw name spelling
     normalized_name: str
+    suggested_graduation_year: int | None = None
+    suggested_class_letter: str | None = None
     vote_count: int
     first_suggested_at: str
     last_suggested_at: str
@@ -150,6 +163,8 @@ class NameVote(BaseModel):
     suggestion_id: UUID  # representative id (use this to approve/reject the group)
     suggested_name: str
     normalized_name: str
+    suggested_graduation_year: int | None = None
+    suggested_class_letter: str | None = None
     vote_count: int
     first_at: str
     last_at: str
@@ -185,6 +200,12 @@ async def list_pending_by_target(_user: User = CurrentUser) -> list[TargetWithSu
             face_id,
             (array_agg(suggested_name order by created_at desc))[1] as suggested_name,
             normalized_name,
+            (array_agg(suggested_graduation_year order by created_at desc)
+              filter (where suggested_graduation_year is not null))[1]
+              as suggested_graduation_year,
+            (array_agg(suggested_class_letter order by created_at desc)
+              filter (where suggested_class_letter is not null))[1]
+              as suggested_class_letter,
             count(*) as vote_count,
             min(created_at) as first_at,
             max(created_at) as last_at,
@@ -212,6 +233,8 @@ async def list_pending_by_target(_user: User = CurrentUser) -> list[TargetWithSu
                 suggestion_id=r["representative_id"],
                 suggested_name=r["suggested_name"],
                 normalized_name=r["normalized_name"],
+                suggested_graduation_year=r["suggested_graduation_year"],
+                suggested_class_letter=r["suggested_class_letter"],
                 vote_count=r["vote_count"],
                 first_at=r["first_at"].isoformat(),
                 last_at=r["last_at"].isoformat(),
@@ -300,6 +323,12 @@ async def list_for_person(person_id: UUID, _user: User = CurrentUser) -> list[Gr
           face_id,
           (array_agg(suggested_name order by created_at desc))[1] as suggested_name,
           normalized_name,
+          (array_agg(suggested_graduation_year order by created_at desc)
+            filter (where suggested_graduation_year is not null))[1]
+            as suggested_graduation_year,
+          (array_agg(suggested_class_letter order by created_at desc)
+            filter (where suggested_class_letter is not null))[1]
+            as suggested_class_letter,
           count(*) as vote_count,
           min(created_at) as first_at,
           max(created_at) as last_at,
@@ -317,6 +346,8 @@ async def list_for_person(person_id: UUID, _user: User = CurrentUser) -> list[Gr
             face_id=r["face_id"],
             suggested_name=r["suggested_name"],
             normalized_name=r["normalized_name"],
+            suggested_graduation_year=r["suggested_graduation_year"],
+            suggested_class_letter=r["suggested_class_letter"],
             vote_count=r["vote_count"],
             first_suggested_at=r["first_at"].isoformat(),
             last_suggested_at=r["last_at"].isoformat(),
@@ -327,8 +358,10 @@ async def list_for_person(person_id: UUID, _user: User = CurrentUser) -> list[Gr
 
 
 class ApproveRequest(BaseModel):
-    # Optional override: admin can tweak spelling before approving.
+    # Optional overrides: admin can tweak before approving.
     final_name: str | None = None
+    final_graduation_year: int | None = None
+    final_class_letter: str | None = None
 
 
 @router.post("/{suggestion_id}/approve")
@@ -345,9 +378,23 @@ async def approve(suggestion_id: UUID, body: ApproveRequest | None = None, user:
     if sugg["status"] != "pending":
         raise HTTPException(status_code=409, detail=f"already {sugg['status']}")
 
-    final_name = (body.final_name.strip() if body and body.final_name else sugg["suggested_name"].strip())
+    final_name = (
+        body.final_name.strip() if body and body.final_name else sugg["suggested_name"].strip()
+    )
     if not final_name:
         raise HTTPException(status_code=400, detail="name cannot be empty")
+
+    # Resolve final ano/turma (admin override takes priority, then suggestion).
+    final_year = (
+        body.final_graduation_year
+        if body and body.final_graduation_year is not None
+        else sugg["suggested_graduation_year"]
+    )
+    final_class = (
+        body.final_class_letter.upper()
+        if body and body.final_class_letter
+        else sugg["suggested_class_letter"]
+    )
 
     person_id = sugg["person_id"]
 
@@ -360,9 +407,15 @@ async def approve(suggestion_id: UUID, body: ApproveRequest | None = None, user:
         if not face_row:
             raise HTTPException(status_code=404, detail="face not found")
         new_person = await db.fetchrow(
-            "insert into public.people (display_name, thumbnail_face_id) values ($1, $2) returning id",
+            """
+            insert into public.people (display_name, thumbnail_face_id,
+                                       graduation_year, class_letter)
+            values ($1, $2, $3, $4) returning id
+            """,
             final_name,
             sugg["face_id"],
+            final_year,
+            final_class,
         )
         assert new_person is not None
         person_id = new_person["id"]
@@ -373,8 +426,16 @@ async def approve(suggestion_id: UUID, body: ApproveRequest | None = None, user:
         )
     else:
         await db.execute(
-            "update public.people set display_name = $1 where id = $2",
+            """
+            update public.people
+               set display_name = $1,
+                   graduation_year = coalesce($2, graduation_year),
+                   class_letter    = coalesce($3, class_letter)
+             where id = $4
+            """,
             final_name,
+            final_year,
+            final_class,
             person_id,
         )
 

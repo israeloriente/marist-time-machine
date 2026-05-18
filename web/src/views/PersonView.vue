@@ -27,6 +27,14 @@ const error = ref<string | null>(null);
 const renameValue = ref("");
 const savingName = ref(false);
 
+const yearValue = ref<number | "">("");
+const classValue = ref<string>("");
+const savingGrad = ref(false);
+
+const currentYear = new Date().getFullYear();
+const graduationYears = Array.from({ length: 111 }, (_, i) => currentYear + 10 - i);
+const classes = ["A", "B", "C", "D", "E", "F"];
+
 async function load() {
   loading.value = true;
   error.value = null;
@@ -38,6 +46,8 @@ async function load() {
       return;
     }
     renameValue.value = person.value.display_name ?? "";
+    yearValue.value = person.value.graduation_year ?? "";
+    classValue.value = person.value.class_letter ?? "";
     [faces.value, photos.value, suggestions.value] = await Promise.all([
       peopleApi.faces(personId),
       peopleApi.photos(personId),
@@ -60,6 +70,24 @@ async function saveName() {
     alert("Erro: " + (e.response?.data?.detail ?? e.message));
   } finally {
     savingName.value = false;
+  }
+}
+
+async function saveGraduation() {
+  if (!person.value) return;
+  savingGrad.value = true;
+  try {
+    const updated = await peopleApi.updateGraduation(
+      personId,
+      yearValue.value === "" ? null : (yearValue.value as number),
+      classValue.value || null,
+    );
+    person.value.graduation_year = updated.graduation_year;
+    person.value.class_letter = updated.class_letter;
+  } catch (e: any) {
+    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } finally {
+    savingGrad.value = false;
   }
 }
 
@@ -96,7 +124,11 @@ async function approveSuggestion(g: SuggestionGroup) {
   const final = prompt("Aprovar com qual nome?", g.suggested_name)?.trim();
   if (final === undefined) return;
   try {
-    await suggestionsApi.approve(g.suggestion_ids[0], final || undefined);
+    await suggestionsApi.approve(g.suggestion_ids[0], {
+      final_name: final || undefined,
+      final_graduation_year: g.suggested_graduation_year ?? null,
+      final_class_letter: g.suggested_class_letter ?? null,
+    });
     // Refresh
     await load();
   } catch (e: any) {
@@ -159,6 +191,32 @@ onMounted(load);
           </span>
         </div>
       </div>
+
+      <section class="grad-section">
+        <h4>Formatura</h4>
+        <div class="grad-row">
+          <label>
+            <span>Ano</span>
+            <select v-model.number="yearValue" class="input" @change="saveGraduation">
+              <option value="">—</option>
+              <option v-for="y in graduationYears" :key="y" :value="y">{{ y }}</option>
+            </select>
+          </label>
+          <label>
+            <span>Turma</span>
+            <select v-model="classValue" class="input" @change="saveGraduation">
+              <option value="">—</option>
+              <option v-for="c in classes" :key="c" :value="c">{{ c }}</option>
+            </select>
+          </label>
+          <span v-if="savingGrad" class="muted small">salvando…</span>
+        </div>
+        <p v-if="!person?.graduation_year && person?.graduation_years?.length" class="muted small fallback-hint">
+          Derivado das fotos:
+          <span v-for="y in person.graduation_years" :key="y" class="tag tag-year">{{ y }}</span>
+          <span v-for="c in person.classes ?? []" :key="c" class="tag tag-class">{{ c }}</span>
+        </p>
+      </section>
 
       <div class="ops">
         <button class="button secondary" @click="openMergePicker">Mesclar com…</button>
@@ -285,6 +343,37 @@ onMounted(load);
   background: var(--surface-strong);
 }
 .small { font-size: 0.85rem; }
+
+.grad-section {
+  margin-top: 1.25rem;
+  padding: 0.85rem;
+  background: var(--surface-strong);
+  border-radius: 10px;
+}
+.grad-section h4 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.grad-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.5rem;
+  align-items: end;
+}
+.grad-row label {
+  display: flex; flex-direction: column; gap: 0.2rem;
+  font-size: 0.8rem; color: var(--muted);
+}
+.fallback-hint {
+  margin: 0.5rem 0 0;
+  display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap;
+}
+.tag {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 99px;
+}
+.tag-year { background: rgba(14, 109, 194, 0.12); color: var(--marista-blue); }
+.tag-class { background: rgba(247, 201, 72, 0.22); color: #8a6913; }
 
 .suggestions {
   margin-top: 1.25rem;

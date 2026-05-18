@@ -20,6 +20,10 @@ class PersonOut(BaseModel):
     display_name: str | None
     thumbnail_face_id: UUID | None
     face_count: int
+    # Canonical graduation info (admin/community-curated)
+    graduation_year: int | None = None
+    class_letter: str | None = None
+    # Derived from photo metadata (fallback when canonical is null)
     graduation_years: list[int] = []
     classes: list[str] = []
 
@@ -27,6 +31,8 @@ class PersonOut(BaseModel):
 class PersonUpdate(BaseModel):
     display_name: str | None = None
     is_hidden: bool | None = None
+    graduation_year: int | None = None
+    class_letter: str | None = None
 
 
 class MergeRequest(BaseModel):
@@ -57,25 +63,38 @@ async def list_people(
 
     if year is not None:
         params.append(year)
+        i = len(params)
+        # Priority: canonical p.graduation_year if set; otherwise derive from photos.
         where_clauses.append(
-            f"""exists (
-                select 1
-                from public.faces f2
-                join public.photos ph2 on ph2.id = f2.photo_id
-                where f2.person_id = p.id
-                  and (ph2.metadata->>'graduation_year')::int = ${len(params)}
+            f"""(
+              (p.graduation_year is not null and p.graduation_year = ${i})
+              or (
+                p.graduation_year is null and exists (
+                  select 1
+                  from public.faces f2
+                  join public.photos ph2 on ph2.id = f2.photo_id
+                  where f2.person_id = p.id
+                    and (ph2.metadata->>'graduation_year')::int = ${i}
+                )
+              )
             )"""
         )
 
     if klass:
         params.append(klass.upper())
+        i = len(params)
         where_clauses.append(
-            f"""exists (
-                select 1
-                from public.faces f3
-                join public.photos ph3 on ph3.id = f3.photo_id
-                where f3.person_id = p.id
-                  and upper(ph3.metadata->>'class') = ${len(params)}
+            f"""(
+              (p.class_letter is not null and p.class_letter = ${i})
+              or (
+                p.class_letter is null and exists (
+                  select 1
+                  from public.faces f3
+                  join public.photos ph3 on ph3.id = f3.photo_id
+                  where f3.person_id = p.id
+                    and upper(ph3.metadata->>'class') = ${i}
+                )
+              )
             )"""
         )
 
@@ -83,6 +102,7 @@ async def list_people(
     params.append(offset)
     sql = f"""
         select p.id, p.display_name, p.thumbnail_face_id,
+               p.graduation_year, p.class_letter,
                count(distinct f.id) as face_count,
                coalesce(
                  array_remove(
@@ -124,6 +144,8 @@ async def list_people(
             display_name=r["display_name"],
             thumbnail_face_id=r["thumbnail_face_id"],
             face_count=r["face_count"],
+            graduation_year=r["graduation_year"],
+            class_letter=r["class_letter"],
             graduation_years=sorted(r["graduation_years"]) if r["graduation_years"] else [],
             classes=sorted(r["classes"]) if r["classes"] else [],
         )
@@ -169,15 +191,31 @@ async def filters_available(_user: User = CurrentUser) -> dict:
 
 
 @router.patch("/{person_id}", response_model=PersonOut)
-async def update_person(person_id: UUID, body: PersonUpdate, _user: User = CurrentUser) -> PersonOut:
+async def update_person(
+    person_id: UUID, body: PersonUpdate, _user: User = CurrentUser
+) -> PersonOut:
+    # Pydantic .model_fields_set tells us which keys the caller actually sent,
+    # so passing display_name=null is distinct from omitting it.
+    sent = body.model_fields_set
     fields: list[str] = []
     args: list = []
-    if body.display_name is not None:
-        args.append(body.display_name)
-        fields.append(f"display_name = ${len(args)}")
-    if body.is_hidden is not None:
-        args.append(body.is_hidden)
-        fields.append(f"is_hidden = ${len(args)}")
+
+    def add(col: str, val):
+        args.append(val)
+        fields.append(f"{col} = ${len(args)}")
+
+    if "display_name" in sent:
+        add("display_name", body.display_name)
+    if "is_hidden" in sent and body.is_hidden is not None:
+        add("is_hidden", body.is_hidden)
+    if "graduation_year" in sent:
+        add("graduation_year", body.graduation_year)
+    if "class_letter" in sent:
+        add(
+            "class_letter",
+            body.class_letter.upper() if body.class_letter else None,
+        )
+
     if not fields:
         raise HTTPException(status_code=400, detail="nothing to update")
     args.append(person_id)
@@ -188,6 +226,7 @@ async def update_person(person_id: UUID, body: PersonUpdate, _user: User = Curre
     row = await db.fetchrow(
         """
         select p.id, p.display_name, p.thumbnail_face_id,
+               p.graduation_year, p.class_letter,
                (select count(*) from public.faces f where f.person_id = p.id) as face_count
         from public.people p where p.id = $1
         """,

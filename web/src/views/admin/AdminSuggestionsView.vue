@@ -24,7 +24,13 @@ async function approveVote(target: TargetWithSuggestions, vote: NameVote) {
   const final = prompt("Aprovar com qual nome?", vote.suggested_name)?.trim();
   if (final === undefined) return;
   try {
-    await suggestionsApi.approve(vote.suggestion_id, final || undefined);
+    await suggestionsApi.approve(vote.suggestion_id, {
+      final_name: final || undefined,
+      // For now pass through whatever the contributor suggested (admin can
+      // edit in /admin/pessoas/:id afterward).
+      final_graduation_year: vote.suggested_graduation_year ?? null,
+      final_class_letter: vote.suggested_class_letter ?? null,
+    });
     await load();
   } catch (e: any) {
     alert("Erro: " + (e.response?.data?.detail ?? e.message));
@@ -91,7 +97,17 @@ onMounted(load);
         <li v-for="v in t.names" :key="v.suggestion_id" class="vote-row">
           <div class="vote-name">
             <strong>{{ v.suggested_name }}</strong>
-            <span class="muted small">{{ v.vote_count }} {{ v.vote_count === 1 ? "voto" : "votos" }}</span>
+            <div class="vote-meta">
+              <span v-if="v.suggested_graduation_year" class="tag tag-year">
+                {{ v.suggested_graduation_year }}
+              </span>
+              <span v-if="v.suggested_class_letter" class="tag tag-class">
+                {{ v.suggested_class_letter }}
+              </span>
+              <span class="muted small">
+                {{ v.vote_count }} {{ v.vote_count === 1 ? "voto" : "votos" }}
+              </span>
+            </div>
           </div>
           <div class="vote-ops">
             <button class="button small" @click="approveVote(t, v)">Aprovar</button>
@@ -157,8 +173,19 @@ onMounted(load);
   border-radius: 8px;
   flex-wrap: wrap;
 }
-.vote-name { display: flex; flex-direction: column; min-width: 0; }
+.vote-name { display: flex; flex-direction: column; min-width: 0; gap: 0.2rem; }
 .vote-name strong { color: var(--marista-navy); }
+.vote-meta { display: flex; gap: 0.3rem; align-items: center; flex-wrap: wrap; }
+.tag {
+  display: inline-block;
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 0.1rem 0.45rem;
+  border-radius: 99px;
+  letter-spacing: 0.02em;
+}
+.tag-year { background: rgba(14, 109, 194, 0.12); color: var(--marista-blue); }
+.tag-class { background: rgba(247, 201, 72, 0.22); color: #8a6913; }
 .vote-ops { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 .button.small {
   min-height: 32px;

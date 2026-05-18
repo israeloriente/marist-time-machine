@@ -100,6 +100,10 @@ export interface Person {
   display_name: string | null;
   thumbnail_face_id: string | null;
   face_count: number;
+  // Canonical (admin/community-curated)
+  graduation_year?: number | null;
+  class_letter?: string | null;
+  // Derived from photo metadata (fallback)
   graduation_years?: number[];
   classes?: string[];
 }
@@ -170,6 +174,15 @@ export const peopleApi = {
     (await api.patch<Person>(`/people/${personId}`, { display_name })).data,
   hide: async (personId: string, is_hidden: boolean): Promise<Person> =>
     (await api.patch<Person>(`/people/${personId}`, { is_hidden })).data,
+  updateGraduation: async (
+    personId: string,
+    graduation_year: number | null,
+    class_letter: string | null,
+  ): Promise<Person> =>
+    (await api.patch<Person>(`/people/${personId}`, {
+      graduation_year,
+      class_letter,
+    })).data,
   merge: async (sourceId: string, targetId: string): Promise<void> => {
     await api.post("/people/merge", { source_id: sourceId, target_id: targetId });
   },
@@ -204,6 +217,8 @@ export interface NameVote {
   suggestion_id: string;
   suggested_name: string;
   normalized_name: string;
+  suggested_graduation_year?: number | null;
+  suggested_class_letter?: string | null;
   vote_count: number;
   first_at: string;
   last_at: string;
@@ -237,16 +252,38 @@ export const meApi = {
 };
 
 export const suggestionsApi = {
-  create: async (target: { person_id?: string; face_id?: string }, suggested_name: string) =>
-    (await api.post("/suggestions", { ...target, suggested_name })).data,
+  create: async (
+    target: { person_id?: string; face_id?: string },
+    suggested_name: string,
+    extras?: { suggested_graduation_year?: number | null; suggested_class_letter?: string | null },
+  ) =>
+    (
+      await api.post("/suggestions", {
+        ...target,
+        suggested_name,
+        suggested_graduation_year: extras?.suggested_graduation_year ?? null,
+        suggested_class_letter: extras?.suggested_class_letter ?? null,
+      })
+    ).data,
   pending: async (): Promise<SuggestionGroup[]> =>
     (await api.get<SuggestionGroup[]>("/suggestions/pending")).data,
   pendingByTarget: async (): Promise<TargetWithSuggestions[]> =>
     (await api.get<TargetWithSuggestions[]>("/suggestions/pending/by-target")).data,
   byPerson: async (person_id: string): Promise<SuggestionGroup[]> =>
     (await api.get<SuggestionGroup[]>(`/suggestions/by-person/${person_id}`)).data,
-  approve: async (suggestion_id: string, final_name?: string) => {
-    await api.post(`/suggestions/${suggestion_id}/approve`, { final_name: final_name ?? null });
+  approve: async (
+    suggestion_id: string,
+    overrides?: {
+      final_name?: string;
+      final_graduation_year?: number | null;
+      final_class_letter?: string | null;
+    },
+  ) => {
+    await api.post(`/suggestions/${suggestion_id}/approve`, {
+      final_name: overrides?.final_name ?? null,
+      final_graduation_year: overrides?.final_graduation_year ?? null,
+      final_class_letter: overrides?.final_class_letter ?? null,
+    });
   },
   reject: async (suggestion_id: string) => {
     await api.post(`/suggestions/${suggestion_id}/reject`);

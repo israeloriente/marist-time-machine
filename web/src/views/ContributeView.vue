@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import FaceThumb from "@/components/FaceThumb.vue";
+import SuggestNameDialog from "@/components/SuggestNameDialog.vue";
 import {
   facesApi,
   peopleApi,
@@ -101,46 +102,50 @@ async function load() {
   }
 }
 
-async function suggestForPerson(p: Person) {
-  const existing = suggested.value[p.id];
-  const prompt_msg = existing
-    ? `Você já sugeriu "${existing}" pra essa pessoa.\nMandar outro nome diferente?`
-    : "Quem é essa pessoa? Digite o nome completo:";
-  const name = prompt(prompt_msg)?.trim();
-  if (!name) return;
-  try {
-    await suggestionsApi.create({ person_id: p.id }, name);
-    suggested.value[p.id] = name;
-    saveSuggested();
-    counts.value[p.id] = (counts.value[p.id] ?? 0) + 1;
-  } catch (e: any) {
-    const detail = e.response?.data?.detail ?? e.message;
-    if (e.response?.status === 409) {
-      alert("Você já sugeriu esse nome.");
-    } else {
-      alert("Erro: " + detail);
-    }
-  }
+// Dialog state — single dialog reused for person or face targets.
+const dialogOpen = ref(false);
+const dialogTarget = ref<
+  | { kind: "person"; id: string }
+  | { kind: "face"; id: string }
+  | null
+>(null);
+
+function openDialogForPerson(p: Person) {
+  dialogTarget.value = { kind: "person", id: p.id };
+  dialogOpen.value = true;
+}
+function openDialogForFace(f: Face) {
+  dialogTarget.value = { kind: "face", id: f.id };
+  dialogOpen.value = true;
 }
 
-async function suggestForFace(f: Face) {
-  const existing = suggested.value[f.id];
-  const prompt_msg = existing
-    ? `Você já sugeriu "${existing}" pra esse rosto.\nMandar outro nome diferente?`
-    : "Quem é? Digite o nome completo:";
-  const name = prompt(prompt_msg)?.trim();
-  if (!name) return;
+const currentTargetSuggested = computed(() => {
+  if (!dialogTarget.value) return "";
+  return suggested.value[dialogTarget.value.id] || "";
+});
+
+async function onSuggestSubmit(payload: {
+  name: string;
+  year: number | null;
+  class_letter: string | null;
+}) {
+  if (!dialogTarget.value) return;
+  const tgt = dialogTarget.value;
+  const apiTarget = tgt.kind === "person" ? { person_id: tgt.id } : { face_id: tgt.id };
   try {
-    await suggestionsApi.create({ face_id: f.id }, name);
-    suggested.value[f.id] = name;
+    await suggestionsApi.create(apiTarget, payload.name, {
+      suggested_graduation_year: payload.year,
+      suggested_class_letter: payload.class_letter,
+    });
+    suggested.value[tgt.id] = payload.name;
     saveSuggested();
-    counts.value[f.id] = (counts.value[f.id] ?? 0) + 1;
+    counts.value[tgt.id] = (counts.value[tgt.id] ?? 0) + 1;
+    dialogOpen.value = false;
   } catch (e: any) {
-    const detail = e.response?.data?.detail ?? e.message;
     if (e.response?.status === 409) {
       alert("Você já sugeriu esse nome.");
     } else {
-      alert("Erro: " + detail);
+      alert("Erro: " + (e.response?.data?.detail ?? e.message));
     }
   }
 }
@@ -213,7 +218,7 @@ onMounted(async () => {
           <span class="muted small">{{ p.face_count }} fotos</span>
           <span v-if="counts[p.id]" class="vote-badge">{{ counts[p.id] }} sugestões</span>
           <span v-if="suggested[p.id]" class="my-suggestion">você: {{ suggested[p.id] }}</span>
-          <button class="button small" @click="suggestForPerson(p)">
+          <button class="button small" @click="openDialogForPerson(p)">
             {{ suggested[p.id] ? "Sugerir outro" : "Sugerir nome" }}
           </button>
         </div>
@@ -229,12 +234,19 @@ onMounted(async () => {
           <span class="muted small">{{ (f.detection_score * 100).toFixed(0) }}% certeza</span>
           <span v-if="counts[f.id]" class="vote-badge">{{ counts[f.id] }} sugestões</span>
           <span v-if="suggested[f.id]" class="my-suggestion">você: {{ suggested[f.id] }}</span>
-          <button class="button small" @click="suggestForFace(f)">
+          <button class="button small" @click="openDialogForFace(f)">
             {{ suggested[f.id] ? "Sugerir outro" : "Sugerir nome" }}
           </button>
         </div>
       </div>
     </div>
+
+    <SuggestNameDialog
+      :open="dialogOpen"
+      :already-suggested="currentTargetSuggested"
+      @close="dialogOpen = false"
+      @submit="onSuggestSubmit"
+    />
   </section>
 </template>
 
