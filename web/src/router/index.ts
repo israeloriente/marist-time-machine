@@ -8,6 +8,12 @@ export const router = createRouter({
     { path: "/", name: "home", component: () => import("@/views/HomeView.vue") },
     { path: "/login", name: "login", component: () => import("@/views/LoginView.vue") },
     {
+      path: "/kiosk",
+      name: "kiosk",
+      component: () => import("@/views/KioskView.vue"),
+      // intentionally NO requiresAuth — this is the public touchscreen page
+    },
+    {
       path: "/onboarding",
       name: "onboarding",
       component: () => import("@/views/OnboardingView.vue"),

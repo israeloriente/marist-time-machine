@@ -51,3 +51,32 @@ def current_user(request: Request) -> User:
 
 
 CurrentUser = Depends(current_user)
+
+
+def optional_user(request: Request) -> User | None:
+    """Like current_user but never raises — returns None when no/invalid token.
+
+    Used by endpoints that must serve both authenticated app users and the
+    public kiosk page.
+    """
+    auth = request.headers.get("authorization", "")
+    scheme, _, token = auth.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    try:
+        payload = jwt.decode(
+            token,
+            settings().jwt_secret,
+            algorithms=["HS256"],
+            audience="authenticated",
+        )
+        return User(
+            id=payload["sub"],
+            email=payload.get("email"),
+            role=payload.get("role", "authenticated"),
+        )
+    except jwt.PyJWTError:
+        return None
+
+
+OptionalUser = Depends(optional_user)

@@ -9,7 +9,10 @@ const profileStore = useProfileStore();
 const route = useRoute();
 
 // Admin section has its own layout (sidebar). Hide the public topbar there.
-const isAdmin = computed(() => route.path.startsWith("/admin"));
+// Kiosk page is full-screen; no topbar either.
+const hideTopbar = computed(
+  () => route.path.startsWith("/admin") || route.path.startsWith("/kiosk"),
+);
 
 // Drop cached profile when the user signs out / changes.
 watch(
@@ -26,8 +29,8 @@ async function signOut() {
 </script>
 
 <template>
-  <!-- Admin routes render their own layout (sidebar) — no public topbar. -->
-  <RouterView v-if="isAdmin" />
+  <!-- Admin / kiosk routes render full-screen — no public topbar. -->
+  <RouterView v-if="hideTopbar" />
 
   <div v-else class="layout">
     <header class="topbar">

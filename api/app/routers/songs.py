@@ -108,6 +108,54 @@ async def list_songs(
     return [_to_song_out(r) for r in rows]
 
 
+@router.get("/random", response_model=list[SongOut])
+async def random_songs(
+    year: int | None = None,
+    klass: str | None = Query(None, alias="class"),
+    limit: int = 20,
+    fallback_any: bool = True,
+) -> list[SongOut]:
+    """Random songs scoped to a class+year (best-effort).
+
+    For the kiosk soundtrack: try songs from the requested year first; if
+    nothing, fall back to any song so we never get total silence.
+    """
+    where: list[str] = []
+    params: list = []
+    if year is not None:
+        params.append(year)
+        where.append(f"up.graduation_year = ${len(params)}")
+    if klass:
+        params.append(klass.upper())
+        where.append(f"up.class_letter = ${len(params)}")
+
+    params.append(limit)
+    base_sql = """
+        select s.id, s.user_id, s.youtube_id, s.title, s.channel, s.caption,
+               s.thumbnail_url, s.created_at,
+               u.email as user_email,
+               up.graduation_year as user_graduation_year,
+               up.class_letter   as user_class_letter
+        from public.songs s
+        left join public.user_profiles up on up.user_id = s.user_id
+        left join auth.users u            on u.id      = s.user_id
+    """
+    where_sql = ("where " + " and ".join(where)) if where else ""
+    rows = await db.fetch(
+        f"{base_sql} {where_sql} order by random() limit ${len(params)}",
+        *params,
+    )
+
+    if not rows and fallback_any:
+        # Repeat without filters
+        rows = await db.fetch(
+            f"{base_sql} order by random() limit $1",
+            limit,
+        )
+
+    return [_to_song_out(r) for r in rows]
+
+
 @router.get("/mine", response_model=list[SongOut])
 async def my_songs(user: User = CurrentUser) -> list[SongOut]:
     rows = await db.fetch(

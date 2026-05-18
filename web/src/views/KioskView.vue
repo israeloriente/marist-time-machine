@@ -1,0 +1,683 @@
+<script setup lang="ts">
+import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { RouterLink } from "vue-router";
+import {
+  randomPhotos,
+  searchByFace,
+  songsApi,
+  type RandomPhoto,
+  type SearchResponse,
+  type Song,
+} from "@/services/api";
+
+type Phase = "idle" | "loading-camera" | "ready" | "running" | "results";
+
+const phase = ref<Phase>("idle");
+const error = ref<string | null>(null);
+
+const currentYear = new Date().getFullYear();
+const years = Array.from({ length: 60 }, (_, i) => currentYear - i);
+const selectedYear = ref<number>(currentYear - 10);
+
+// Hidden camera elements
+const videoEl = ref<HTMLVideoElement | null>(null);
+const stream = ref<MediaStream | null>(null);
+
+// Slideshow
+const photos = ref<RandomPhoto[]>([]);
+const slideIdx = ref(0);
+let slideTimer: number | null = null;
+
+// Hidden YouTube player
+const playerEl = ref<HTMLDivElement | null>(null);
+let ytPlayer: any = null;
+let ytReadyPromise: Promise<void> | null = null;
+const songs = ref<Song[]>([]);
+const currentSongIdx = ref(0);
+const currentSongTitle = ref<string>("");
+
+// Search result
+const result = ref<SearchResponse | null>(null);
+const totalSteps = 4; // pseudo progress
+const progressStep = ref(0);
+
+const SEARCH_DURATION_MS = 8000; // animação dura ~8s antes de mostrar resultado
+
+// ---- Lifecycle ----
+// Kiosk page is public — no auth required. The 3 endpoints it calls
+// (/search, /photos/random, /songs/random) accept anonymous requests.
+
+async function startCamera() {
+  phase.value = "loading-camera";
+  error.value = null;
+  try {
+    stream.value = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "user", width: 1280, height: 720 },
+      audio: false,
+    });
+    if (videoEl.value) {
+      videoEl.value.srcObject = stream.value;
+      await videoEl.value.play();
+    }
+    phase.value = "ready";
+  } catch (e: any) {
+    error.value = "Não foi possível acessar a câmera: " + (e.message ?? e);
+    phase.value = "idle";
+  }
+}
+
+function stopCamera() {
+  stream.value?.getTracks().forEach((t) => t.stop());
+  stream.value = null;
+}
+
+async function captureSnapshot(): Promise<Blob | null> {
+  if (!videoEl.value) return null;
+  const v = videoEl.value;
+  if (!v.videoWidth) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = v.videoWidth;
+  canvas.height = v.videoHeight;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.drawImage(v, 0, 0);
+  return await new Promise((res) => canvas.toBlob((b) => res(b), "image/jpeg", 0.92));
+}
+
+// ---- YouTube IFrame API (hidden player for audio) ----
+
+function loadYouTubeAPI(): Promise<void> {
+  if (ytReadyPromise) return ytReadyPromise;
+  ytReadyPromise = new Promise((resolve) => {
+    if ((window as any).YT && (window as any).YT.Player) {
+      resolve();
+      return;
+    }
+    const tag = document.createElement("script");
+    tag.src = "https://www.youtube.com/iframe_api";
+    document.head.appendChild(tag);
+    (window as any).onYouTubeIframeAPIReady = () => resolve();
+  });
+  return ytReadyPromise;
+}
+
+async function playNextSong() {
+  if (!songs.value.length) return;
+  const s = songs.value[currentSongIdx.value % songs.value.length];
+  currentSongTitle.value = s.title || "♪";
+  currentSongIdx.value++;
+
+  await loadYouTubeAPI();
+  if (!playerEl.value) return;
+
+  if (!ytPlayer) {
+    ytPlayer = new (window as any).YT.Player(playerEl.value, {
+      height: "1",
+      width: "1",
+      videoId: s.youtube_id,
+      playerVars: { autoplay: 1, controls: 0, modestbranding: 1, playsinline: 1 },
+      events: {
+        onReady: (e: any) => {
+          e.target.setVolume(70);
+          e.target.playVideo();
+        },
+        onStateChange: (e: any) => {
+          // 0 = ended → próxima
+          if (e.data === 0) playNextSong();
+        },
+        onError: () => playNextSong(),
+      },
+    });
+  } else {
+    ytPlayer.loadVideoById(s.youtube_id);
+  }
+}
+
+function stopMusic() {
+  try {
+    ytPlayer?.stopVideo?.();
+    ytPlayer?.destroy?.();
+  } catch {
+    /* ignore */
+  }
+  ytPlayer = null;
+}
+
+// ---- Main flow ----
+
+async function startJourney() {
+  // Make sure camera is ready (no-op if already running)
+  if (!stream.value) {
+    await startCamera();
+  }
+  if (!stream.value) return; // startCamera failed → error already set
+
+  phase.value = "running";
+  progressStep.value = 0;
+  result.value = null;
+
+  // 1) Fetch slideshow + songs in parallel (start animation ASAP)
+  const photosP = randomPhotos(40, selectedYear.value).catch(() => []);
+  const songsP = songsApi.random(selectedYear.value, 20).catch(() => []);
+
+  photos.value = await photosP;
+  songs.value = await songsP;
+
+  startSlideshow();
+  if (songs.value.length) playNextSong();
+
+  // 2) Capture the user discreetly during the 1st second of animation,
+  //    after a brief settle so the camera autoexposure stabilizes.
+  await new Promise((r) => setTimeout(r, 1200));
+  const snap = await captureSnapshot();
+  progressStep.value = 1;
+
+  // 3) Send to /search in background while animation continues.
+  let searchP: Promise<SearchResponse> | null = null;
+  if (snap) {
+    searchP = searchByFace(snap).catch((e) => {
+      console.error("search failed", e);
+      return { person_id: null, matched_faces: 0, photos: [] } as SearchResponse;
+    });
+  }
+
+  // Animated progress bar — purely visual
+  const stepEvery = SEARCH_DURATION_MS / totalSteps;
+  for (let i = 1; i < totalSteps; i++) {
+    await new Promise((r) => setTimeout(r, stepEvery));
+    progressStep.value = i + 1;
+  }
+
+  // 4) Make sure the search is done before transitioning.
+  const res = searchP ? await searchP : ({ person_id: null, matched_faces: 0, photos: [] } as SearchResponse);
+  result.value = res;
+  phase.value = "results";
+
+  // Keep music playing — it adds to the moment.
+  stopCamera();
+  stopSlideshow();
+}
+
+function reset() {
+  stopMusic();
+  stopCamera();
+  stopSlideshow();
+  result.value = null;
+  photos.value = [];
+  songs.value = [];
+  currentSongIdx.value = 0;
+  currentSongTitle.value = "";
+  progressStep.value = 0;
+  phase.value = "idle";
+}
+
+// ---- Slideshow ----
+
+function startSlideshow() {
+  slideIdx.value = 0;
+  if (slideTimer) window.clearInterval(slideTimer);
+  slideTimer = window.setInterval(() => {
+    if (photos.value.length) {
+      slideIdx.value = (slideIdx.value + 1) % photos.value.length;
+    }
+  }, 3500);
+}
+function stopSlideshow() {
+  if (slideTimer) {
+    window.clearInterval(slideTimer);
+    slideTimer = null;
+  }
+}
+
+const currentPhoto = computed(() => photos.value[slideIdx.value] || null);
+const previousPhoto = computed(
+  () => photos.value[(slideIdx.value - 1 + photos.value.length) % photos.value.length] || null,
+);
+
+const progressPct = computed(() => Math.round((progressStep.value / totalSteps) * 100));
+
+// ---- Init ----
+
+onMounted(() => {
+  // Nothing to bootstrap — page is public. Camera prompt happens on user
+  // click (browser blocks getUserMedia without a gesture anyway).
+});
+
+onBeforeUnmount(() => {
+  stopCamera();
+  stopMusic();
+  stopSlideshow();
+});
+</script>
+
+<template>
+  <div class="kiosk" :class="`phase-${phase}`">
+    <!-- Hidden camera + YouTube player (kept in DOM even during idle so they
+         persist across phases) -->
+    <video
+      ref="videoEl"
+      class="hidden-camera"
+      playsinline
+      muted
+      autoplay
+    />
+    <div ref="playerEl" class="hidden-player" aria-hidden="true" />
+
+    <!-- Tiny exit button (hold for 3s to leave kiosk) -->
+    <RouterLink to="/" class="kiosk-exit" title="Sair do modo kiosk">×</RouterLink>
+
+    <!-- IDLE / READY: hero with year picker and CTA -->
+    <transition name="fade">
+      <section v-if="phase === 'idle' || phase === 'loading-camera' || phase === 'ready'" class="hero">
+        <div class="hero-content">
+          <span class="kicker">Colégio Marista Pio X</span>
+          <h1>Você se lembra?</h1>
+          <p class="lead">
+            Volte no tempo e reviva momentos do colégio. <br />
+            Escolha o ano em que você se formou.
+          </p>
+
+          <div class="year-picker">
+            <div class="year-track">
+              <button
+                v-for="y in years"
+                :key="y"
+                type="button"
+                class="year-chip"
+                :class="{ active: selectedYear === y }"
+                @click="selectedYear = y"
+              >{{ y }}</button>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            class="big-cta"
+            :disabled="phase === 'loading-camera'"
+            @click="startJourney"
+          >
+            <span v-if="phase === 'loading-camera'">Preparando…</span>
+            <span v-else>Volte no Tempo</span>
+          </button>
+
+          <p v-if="error" class="error">{{ error }}</p>
+        </div>
+
+        <div class="hero-bg" aria-hidden="true">
+          <div class="orb orb-1" />
+          <div class="orb orb-2" />
+          <div class="orb orb-3" />
+        </div>
+      </section>
+    </transition>
+
+    <!-- RUNNING: full-screen ken-burns slideshow -->
+    <transition name="fade">
+      <section v-if="phase === 'running'" class="slideshow">
+        <transition-group name="cross" tag="div" class="slide-stack">
+          <img
+            v-if="currentPhoto"
+            :key="currentPhoto.id"
+            :src="currentPhoto.signed_url"
+            class="slide ken-burns"
+            alt=""
+          />
+        </transition-group>
+
+        <div class="slide-overlay">
+          <div class="search-status">
+            <h2>Procurando suas memórias…</h2>
+            <p v-if="currentSongTitle" class="now-playing">♪ {{ currentSongTitle }}</p>
+            <div class="progress">
+              <div class="progress-fill" :style="{ width: progressPct + '%' }" />
+            </div>
+            <p class="muted">Turma {{ selectedYear }}</p>
+          </div>
+        </div>
+      </section>
+    </transition>
+
+    <!-- RESULTS -->
+    <transition name="fade">
+      <section v-if="phase === 'results'" class="results">
+        <div class="results-head">
+          <span class="kicker">Aqui está você</span>
+          <h2 v-if="result?.photos.length">
+            {{ result.photos.length }} {{ result.photos.length === 1 ? "memória encontrada" : "memórias encontradas" }}
+          </h2>
+          <h2 v-else>Não encontramos suas fotos ainda</h2>
+          <p v-if="!result?.photos.length" class="muted">
+            Talvez o acervo ainda não tenha você. Mas o reconhecimento aprende — volte em breve.
+          </p>
+        </div>
+
+        <div v-if="result?.photos.length" class="results-grid">
+          <a
+            v-for="p in result.photos.slice(0, 30)"
+            :key="p.photo_id"
+            :href="p.signed_url"
+            target="_blank"
+            rel="noopener"
+            class="result-tile"
+          >
+            <img :src="p.thumb_signed_url || p.signed_url" alt="" loading="lazy" />
+            <span v-if="p.media_type === 'video'" class="video-pill">▶ vídeo</span>
+          </a>
+        </div>
+
+        <button class="big-cta secondary" type="button" @click="reset">Procurar de novo</button>
+      </section>
+    </transition>
+  </div>
+</template>
+
+<style scoped>
+.kiosk {
+  position: fixed;
+  inset: 0;
+  background: linear-gradient(180deg, #0c2c4f 0%, #0a1f3a 100%);
+  color: var(--text-on-dark);
+  overflow: hidden;
+  font-family: inherit;
+}
+
+/* Hidden but functional */
+.hidden-camera {
+  position: absolute;
+  width: 1px; height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+.hidden-player {
+  position: absolute;
+  width: 1px; height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ----- HERO ----- */
+.hero {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4vh 4vw;
+  z-index: 2;
+}
+.hero-content {
+  position: relative;
+  z-index: 2;
+  max-width: 920px;
+  text-align: center;
+}
+.kicker {
+  display: inline-block;
+  background: var(--marista-yellow);
+  color: var(--marista-navy);
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-bottom: 1.6rem;
+}
+.hero h1 {
+  font-size: clamp(2.5rem, 7vw, 5.5rem);
+  margin: 0 0 1.2rem;
+  line-height: 1.05;
+  color: var(--marista-white);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+.lead {
+  font-size: clamp(1.1rem, 2.2vw, 1.5rem);
+  color: var(--muted-on-dark);
+  margin: 0 auto 2.5rem;
+  max-width: 640px;
+  line-height: 1.5;
+}
+
+.year-picker {
+  margin: 1.5rem auto 2.5rem;
+  max-width: 880px;
+}
+.year-track {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+  max-height: 200px;
+  overflow-y: auto;
+  padding: 0.5rem;
+}
+.year-chip {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--marista-white);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  padding: 0.7rem 1.3rem;
+  font-size: 1.05rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, transform 0.05s;
+  min-height: 50px;
+}
+.year-chip:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+.year-chip.active {
+  background: var(--marista-yellow);
+  color: var(--marista-navy);
+  border-color: var(--marista-yellow);
+  transform: scale(1.05);
+}
+
+.big-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--marista-yellow);
+  color: var(--marista-navy);
+  font-size: 1.5rem;
+  font-weight: 800;
+  padding: 1.3rem 3.5rem;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  box-shadow: 0 10px 40px rgba(247, 201, 72, 0.35);
+  transition: transform 0.1s, box-shadow 0.15s;
+  min-height: 76px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.big-cta:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 50px rgba(247, 201, 72, 0.5);
+}
+.big-cta:active:not(:disabled) { transform: scale(0.97); }
+.big-cta:disabled { opacity: 0.6; cursor: not-allowed; }
+.big-cta.secondary {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--marista-white);
+  box-shadow: none;
+}
+.big-cta.secondary:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Decorative blobs */
+.hero-bg { position: absolute; inset: 0; pointer-events: none; z-index: 1; }
+.orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  opacity: 0.4;
+  animation: float 18s ease-in-out infinite;
+}
+.orb-1 { background: var(--marista-blue); width: 50vw; height: 50vw; top: -10vw; left: -15vw; }
+.orb-2 { background: var(--marista-yellow); width: 40vw; height: 40vw; bottom: -10vw; right: -10vw; animation-delay: -6s; opacity: 0.25; }
+.orb-3 { background: var(--marista-pink); width: 30vw; height: 30vw; top: 30vh; right: 10vw; animation-delay: -12s; opacity: 0.18; }
+@keyframes float {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(40px, -40px) scale(1.08); }
+  66% { transform: translate(-30px, 30px) scale(0.95); }
+}
+
+/* ----- SLIDESHOW ----- */
+.slideshow {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  background: #000;
+}
+.slide-stack { position: absolute; inset: 0; }
+.slide {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ken-burns {
+  animation: kenburns 6s ease-out forwards;
+}
+@keyframes kenburns {
+  from { transform: scale(1.0); }
+  to   { transform: scale(1.15); }
+}
+
+.slide-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(12,44,79,0.2) 0%, rgba(12,44,79,0.75) 100%);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 6vh 4vw;
+}
+.search-status {
+  text-align: center;
+  max-width: 600px;
+}
+.search-status h2 {
+  font-size: clamp(1.5rem, 3.5vw, 2.5rem);
+  color: var(--marista-white);
+  margin: 0 0 0.5rem;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.5);
+}
+.now-playing {
+  margin: 0.4rem 0 1.2rem;
+  color: var(--marista-yellow);
+  font-weight: 600;
+  font-size: 1.05rem;
+  letter-spacing: 0.02em;
+}
+.progress {
+  height: 6px;
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 99px;
+  overflow: hidden;
+  max-width: 440px;
+  margin: 0 auto 0.8rem;
+}
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--marista-yellow), var(--marista-blue-soft));
+  transition: width 0.5s ease;
+}
+
+/* Transition between slides */
+.cross-enter-active, .cross-leave-active {
+  transition: opacity 1.2s ease-in-out;
+}
+.cross-enter-from, .cross-leave-to { opacity: 0; }
+
+/* ----- RESULTS ----- */
+.results {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: linear-gradient(180deg, #0c2c4f 0%, #0a1f3a 100%);
+  overflow-y: auto;
+  padding: 4vh 4vw;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.5rem;
+}
+.results-head { text-align: center; max-width: 800px; }
+.results-head h2 {
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  color: var(--marista-white);
+  margin: 0.5rem 0 0.4rem;
+}
+.results-head .muted {
+  color: var(--muted-on-dark);
+}
+.results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 0.85rem;
+  max-width: 1280px;
+  width: 100%;
+}
+.result-tile {
+  position: relative;
+  display: block;
+  aspect-ratio: 1 / 1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  transition: transform 0.2s;
+}
+.result-tile:hover { transform: scale(1.04); }
+.result-tile img {
+  width: 100%; height: 100%; object-fit: cover;
+  display: block;
+}
+.video-pill {
+  position: absolute;
+  bottom: 6px; right: 6px;
+  background: rgba(0,0,0,0.7);
+  color: var(--marista-yellow);
+  font-size: 0.72rem;
+  padding: 2px 7px;
+  border-radius: 99px;
+}
+
+/* ----- Transitions between phases ----- */
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.6s ease;
+}
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
+.error { color: var(--marista-yellow); margin-top: 1rem; font-weight: 600; }
+
+/* Tiny exit button — discreet, top-right corner */
+.kiosk-exit {
+  position: fixed;
+  top: 0.6rem;
+  right: 0.8rem;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.04);
+  color: rgba(255, 255, 255, 0.3);
+  text-decoration: none;
+  font-size: 1.1rem;
+  font-weight: 300;
+  z-index: 100;
+  transition: background 0.15s, color 0.15s;
+}
+.kiosk-exit:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: var(--marista-white);
+}
+</style>

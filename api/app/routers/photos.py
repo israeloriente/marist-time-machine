@@ -335,6 +335,39 @@ async def dedupe(_user: User = CurrentUser) -> dict:
     }
 
 
+@router.get("/random")
+async def random_photos(
+    limit: int = 30,
+    year: int | None = None,
+) -> list[dict]:
+    """Return random *image* photos (skip videos) for ambient slideshows."""
+    where = ["coalesce(metadata->>'media_type','image') = 'image'"]
+    params: list = []
+    if year is not None:
+        params.append(year)
+        where.append(f"(metadata->>'graduation_year')::int = ${len(params)}")
+    params.append(limit)
+    rows = await db.fetch(
+        f"""
+        select id, storage_bucket, storage_path, metadata
+        from public.photos
+        where {' and '.join(where)}
+        order by random()
+        limit ${len(params)}
+        """,
+        *params,
+    )
+    out = []
+    for r in rows:
+        meta = storage.coerce_metadata(r["metadata"])
+        out.append({
+            "id": str(r["id"]),
+            "signed_url": storage.signed_url(r["storage_bucket"], r["storage_path"]),
+            "thumb_signed_url": storage.thumb_signed_url(meta, r["storage_bucket"], r["storage_path"]),
+        })
+    return out
+
+
 @router.get("/{photo_id}/url")
 async def photo_signed_url(photo_id: UUID, _user: User = CurrentUser) -> dict:
     row = await db.fetchrow(

@@ -15,7 +15,7 @@ from pydantic import BaseModel
 
 from .. import db
 from ..config import settings
-from ..deps import CurrentUser, User
+from ..deps import OptionalUser, User
 from ..services import storage
 from ..services.ml_client import ml_client
 
@@ -44,7 +44,7 @@ class SearchResponse(BaseModel):
 async def search_by_face(
     file: UploadFile = File(...),
     limit: int = 50,
-    user: User = CurrentUser,
+    user: User | None = OptionalUser,
 ) -> SearchResponse:
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="must be an image")
@@ -171,5 +171,5 @@ async def search_by_face(
         )
 
     photos.sort(key=lambda p: p.distance)
-    _ = user  # auth required, identity unused for now
+    _ = user  # optional; identity not used for ranking
     return SearchResponse(person_id=person_id, matched_faces=len(photos), photos=photos)

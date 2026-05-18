@@ -63,6 +63,19 @@ export async function dedupePhotos(): Promise<{
   return data;
 }
 
+export interface RandomPhoto {
+  id: string;
+  signed_url: string;
+  thumb_signed_url: string;
+}
+
+export async function randomPhotos(limit = 30, year?: number): Promise<RandomPhoto[]> {
+  const params: Record<string, string | number> = { limit };
+  if (year !== undefined) params.year = year;
+  const { data } = await api.get<RandomPhoto[]>("/photos/random", { params });
+  return data;
+}
+
 export async function regenerateVideoThumbnails(): Promise<{
   videos_visited: number;
   thumbnails_generated: number;
@@ -277,6 +290,11 @@ export const songsApi = {
     if (filters.class) params.class = filters.class;
     if (filters.user_id) params.user_id = filters.user_id;
     return (await api.get<Song[]>("/songs", { params })).data;
+  },
+  random: async (year?: number, limit = 20): Promise<Song[]> => {
+    const params: Record<string, string | number> = { limit };
+    if (year !== undefined) params.year = year;
+    return (await api.get<Song[]>("/songs/random", { params })).data;
   },
   mine: async (): Promise<Song[]> => (await api.get<Song[]>("/songs/mine")).data,
   create: async (url: string, caption?: string): Promise<Song> =>
