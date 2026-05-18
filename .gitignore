@@ -211,3 +211,7 @@ supabase/.branches
 supabase/.temp
 
 scripts/.coolify.env
+
+# TS incremental build cache
+web/tsconfig.tsbuildinfo
+**/tsconfig.tsbuildinfo

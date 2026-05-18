@@ -207,6 +207,8 @@ export interface SuggestionGroup {
   face_id: string | null;
   suggested_name: string;
   normalized_name: string;
+  suggested_graduation_year?: number | null;
+  suggested_class_letter?: string | null;
   vote_count: number;
   first_suggested_at: string;
   last_suggested_at: string;
