@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink, RouterView, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
 import { useProfileStore } from "@/stores/profile";
-import { peopleApi, suggestionsApi, facesApi } from "@/services/api";
+import { peopleApi, suggestionsApi, facesApi, moderationApi } from "@/services/api";
 
 const auth = useAuthStore();
 const profileStore = useProfileStore();
@@ -15,20 +15,20 @@ async function handleSignOut() {
 const route = useRoute();
 
 const drawerOpen = ref(false);
-const counts = ref({ people: 0, unassigned: 0, suggestions: 0 });
+const counts = ref({ people: 0, unassigned: 0, suggestions: 0, pendingPhotos: 0 });
 
 async function refreshCounts() {
   try {
-    const [stats, list, faces] = await Promise.all([
+    const [stats, list, faces, modCounts] = await Promise.all([
       peopleApi.stats().catch(() => null),
       suggestionsApi.pendingByTarget().catch(() => []),
       facesApi.unassigned(1, 0, 0.5).catch(() => []),
+      moderationApi.counts().catch(() => ({ pending: 0, approved: 0, rejected: 0 })),
     ]);
     if (stats) counts.value.people = stats.people;
     counts.value.suggestions = list.length;
-    // unassigned count: get from stats (total - clustered)
     if (stats) counts.value.unassigned = Math.max(0, stats.faces_total - stats.faces_clustered);
-    // Touch faces to keep API alive / avoid unused var
+    counts.value.pendingPhotos = modCounts.pending;
     void faces;
   } catch {
     /* silent */
@@ -92,6 +92,11 @@ const userInitial = computed(() => userEmail.value.slice(0, 1).toUpperCase());
         </RouterLink>
 
         <div class="nav-section">Moderação</div>
+        <RouterLink to="/admin/fotos" class="nav-item">
+          <span class="icon">📷</span>
+          <span>Fotos</span>
+          <span v-if="counts.pendingPhotos" class="count badge-yellow">{{ counts.pendingPhotos }}</span>
+        </RouterLink>
         <RouterLink to="/admin/sugestoes" class="nav-item">
           <span class="icon">🏷️</span>
           <span>Sugestões</span>

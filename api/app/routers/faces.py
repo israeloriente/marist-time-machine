@@ -68,6 +68,7 @@ async def list_unassigned(
         join public.photos p on p.id = f.photo_id
         where f.person_id is null
           and coalesce(f.detection_score, 0) >= $3
+          and p.moderation_status <> 'rejected'
         order by f.detection_score desc nulls last
         limit $1 offset $2
         """,

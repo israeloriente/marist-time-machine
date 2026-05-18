@@ -107,6 +107,7 @@ async def search_by_face(
                    f.embedding <=> $1 as distance
             from public.faces f
             join public.photos p on p.id = f.photo_id
+            where p.moderation_status = 'approved'
             order by distance asc
             limit $2
             """,
@@ -143,6 +144,7 @@ async def search_by_face(
         from public.faces f
         join public.photos ph on ph.id = f.photo_id
         where f.person_id = $2
+          and ph.moderation_status = 'approved'
         group by ph.id, ph.storage_bucket, ph.storage_path, ph.uploaded_at, ph.metadata
         order by distance asc
         limit $3

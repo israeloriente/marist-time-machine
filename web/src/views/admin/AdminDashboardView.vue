@@ -3,29 +3,34 @@ import { computed, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import {
   dedupePhotos,
+  moderationApi,
   peopleApi,
   regenerateVideoThumbnails,
   suggestionsApi,
   type ClusterStats,
+  type ModerationCounts,
   type ReclusterStatus,
 } from "@/services/api";
 
 const stats = ref<ClusterStats | null>(null);
 const status = ref<ReclusterStatus | null>(null);
 const suggestionsPending = ref<number>(0);
+const photoCounts = ref<ModerationCounts>({ pending: 0, approved: 0, rejected: 0 });
 const reclusterBusy = ref(false);
 const dedupeBusy = ref(false);
 const thumbsBusy = ref(false);
 
 async function load() {
-  const [s, st, sug] = await Promise.all([
+  const [s, st, sug, pc] = await Promise.all([
     peopleApi.stats().catch(() => null),
     peopleApi.status().catch(() => null),
     suggestionsApi.pendingByTarget().catch(() => []),
+    moderationApi.counts().catch(() => ({ pending: 0, approved: 0, rejected: 0 })),
   ]);
   stats.value = s;
   status.value = st;
   suggestionsPending.value = sug.length;
+  photoCounts.value = pc;
 }
 
 const clusteredPct = computed(() => {
@@ -124,6 +129,11 @@ onMounted(load);
         <span class="kpi-frac muted">/ {{ stats?.faces_total ?? "—" }}</span>
       </strong>
       <span class="kpi-sub muted">{{ clusteredPct }}% do total</span>
+    </RouterLink>
+    <RouterLink to="/admin/fotos" class="kpi-card" :class="{ highlight: photoCounts.pending > 0 }">
+      <span class="kpi-label">Fotos pendentes</span>
+      <strong class="kpi-value">{{ photoCounts.pending }}</strong>
+      <span class="kpi-sub muted">aguardam aprovação</span>
     </RouterLink>
     <RouterLink to="/admin/sugestoes" class="kpi-card highlight">
       <span class="kpi-label">Sugestões pendentes</span>

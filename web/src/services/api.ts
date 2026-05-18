@@ -51,7 +51,53 @@ export interface UploadResponse {
     detection_score: number;
   }>;
   duplicate?: boolean;
+  moderation_status?: "pending" | "approved" | "rejected";
+  pending?: boolean;
 }
+
+// ---------- Photo moderation ----------
+
+export interface PhotoModerationItem {
+  id: string;
+  storage_bucket: string;
+  storage_path: string;
+  uploaded_at: string;
+  uploaded_by: string | null;
+  uploader_email: string | null;
+  metadata: Record<string, unknown>;
+  media_type: "image" | "video";
+  signed_url: string;
+  thumb_signed_url: string;
+  moderation_status: "pending" | "approved" | "rejected";
+  moderation_note: string | null;
+  moderated_at: string | null;
+  face_count: number;
+}
+
+export interface ModerationCounts {
+  pending: number;
+  approved: number;
+  rejected: number;
+}
+
+export const moderationApi = {
+  list: async (
+    status_filter: "pending" | "approved" | "rejected" = "pending",
+    limit = 100,
+    offset = 0,
+  ): Promise<PhotoModerationItem[]> =>
+    (
+      await api.get<PhotoModerationItem[]>("/photos/moderation", {
+        params: { status_filter, limit, offset },
+      })
+    ).data,
+  counts: async (): Promise<ModerationCounts> =>
+    (await api.get<ModerationCounts>("/photos/moderation/counts")).data,
+  approve: async (id: string, note?: string): Promise<PhotoModerationItem> =>
+    (await api.post<PhotoModerationItem>(`/photos/${id}/approve`, { note: note ?? null })).data,
+  reject: async (id: string, note?: string): Promise<PhotoModerationItem> =>
+    (await api.post<PhotoModerationItem>(`/photos/${id}/reject`, { note: note ?? null })).data,
+};
 
 export async function dedupePhotos(): Promise<{
   photos_visited: number;

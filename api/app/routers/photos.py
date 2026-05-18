@@ -34,6 +34,8 @@ class PhotoOut(BaseModel):
     metadata: dict
     faces: list[FaceOut] = []
     duplicate: bool = False  # true when the upload matched an existing photo by content hash
+    moderation_status: str = "pending"  # pending | approved | rejected
+    pending: bool = False                # convenience flag for the upload UI
 
 
 @router.post("", response_model=PhotoOut)
@@ -194,6 +196,162 @@ async def upload_photo(
         uploaded_at=photo_row["uploaded_at"].isoformat(),
         metadata=photo_row["metadata"],
         faces=inserted_faces,
+        moderation_status="pending",
+        pending=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Admin moderation
+# ---------------------------------------------------------------------------
+
+class PhotoModerationOut(BaseModel):
+    id: UUID
+    storage_bucket: str
+    storage_path: str
+    uploaded_at: str
+    uploaded_by: UUID | None
+    uploader_email: str | None
+    metadata: dict
+    media_type: str
+    signed_url: str
+    thumb_signed_url: str
+    moderation_status: str
+    moderation_note: str | None
+    moderated_at: str | None
+    face_count: int
+
+
+@router.get("/moderation", response_model=list[PhotoModerationOut])
+async def list_for_moderation(
+    status_filter: str = "pending",
+    limit: int = 100,
+    offset: int = 0,
+    _user: User = CurrentUser,
+) -> list[PhotoModerationOut]:
+    """Admin queue: list photos by moderation status (pending/approved/rejected)."""
+    if status_filter not in {"pending", "approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="status must be pending|approved|rejected")
+    rows = await db.fetch(
+        """
+        select p.id, p.storage_bucket, p.storage_path, p.uploaded_at, p.uploaded_by,
+               p.metadata, p.moderation_status, p.moderation_note, p.moderated_at,
+               u.email as uploader_email,
+               (select count(*) from public.faces f where f.photo_id = p.id) as face_count
+        from public.photos p
+        left join auth.users u on u.id = p.uploaded_by
+        where p.moderation_status = $1
+        order by p.uploaded_at desc
+        limit $2 offset $3
+        """,
+        status_filter,
+        limit,
+        offset,
+    )
+    out: list[PhotoModerationOut] = []
+    for r in rows:
+        meta = storage.coerce_metadata(r["metadata"])
+        out.append(PhotoModerationOut(
+            id=r["id"],
+            storage_bucket=r["storage_bucket"],
+            storage_path=r["storage_path"],
+            uploaded_at=r["uploaded_at"].isoformat(),
+            uploaded_by=r["uploaded_by"],
+            uploader_email=r["uploader_email"],
+            metadata=meta,
+            media_type=meta.get("media_type", "image"),
+            signed_url=storage.signed_url(r["storage_bucket"], r["storage_path"]),
+            thumb_signed_url=storage.thumb_signed_url(meta, r["storage_bucket"], r["storage_path"]),
+            moderation_status=r["moderation_status"],
+            moderation_note=r["moderation_note"],
+            moderated_at=r["moderated_at"].isoformat() if r["moderated_at"] else None,
+            face_count=r["face_count"],
+        ))
+    return out
+
+
+@router.get("/moderation/counts")
+async def moderation_counts(_user: User = CurrentUser) -> dict:
+    row = await db.fetchrow(
+        """
+        select
+          count(*) filter (where moderation_status = 'pending')  as pending,
+          count(*) filter (where moderation_status = 'approved') as approved,
+          count(*) filter (where moderation_status = 'rejected') as rejected
+        from public.photos
+        """
+    )
+    return dict(row) if row else {"pending": 0, "approved": 0, "rejected": 0}
+
+
+class ModerationDecision(BaseModel):
+    note: str | None = None
+
+
+@router.post("/{photo_id}/approve", response_model=PhotoModerationOut)
+async def approve_photo(
+    photo_id: UUID, body: ModerationDecision | None = None, user: User = CurrentUser
+) -> PhotoModerationOut:
+    return await _set_moderation(photo_id, "approved", body, user)
+
+
+@router.post("/{photo_id}/reject", response_model=PhotoModerationOut)
+async def reject_photo(
+    photo_id: UUID, body: ModerationDecision | None = None, user: User = CurrentUser
+) -> PhotoModerationOut:
+    return await _set_moderation(photo_id, "rejected", body, user)
+
+
+async def _set_moderation(
+    photo_id: UUID, status_str: str, body: ModerationDecision | None, user: User,
+) -> PhotoModerationOut:
+    note = (body.note.strip() if body and body.note else None) or None
+    result = await db.execute(
+        """
+        update public.photos
+           set moderation_status = $1,
+               moderation_note = $2,
+               moderated_at = now(),
+               moderated_by = $3
+         where id = $4
+        """,
+        status_str,
+        note,
+        UUID(user.id),
+        photo_id,
+    )
+    if result.endswith(" 0"):
+        raise HTTPException(status_code=404, detail="photo not found")
+
+    row = await db.fetchrow(
+        """
+        select p.id, p.storage_bucket, p.storage_path, p.uploaded_at, p.uploaded_by,
+               p.metadata, p.moderation_status, p.moderation_note, p.moderated_at,
+               u.email as uploader_email,
+               (select count(*) from public.faces f where f.photo_id = p.id) as face_count
+        from public.photos p
+        left join auth.users u on u.id = p.uploaded_by
+        where p.id = $1
+        """,
+        photo_id,
+    )
+    assert row is not None
+    meta = storage.coerce_metadata(row["metadata"])
+    return PhotoModerationOut(
+        id=row["id"],
+        storage_bucket=row["storage_bucket"],
+        storage_path=row["storage_path"],
+        uploaded_at=row["uploaded_at"].isoformat(),
+        uploaded_by=row["uploaded_by"],
+        uploader_email=row["uploader_email"],
+        metadata=meta,
+        media_type=meta.get("media_type", "image"),
+        signed_url=storage.signed_url(row["storage_bucket"], row["storage_path"]),
+        thumb_signed_url=storage.thumb_signed_url(meta, row["storage_bucket"], row["storage_path"]),
+        moderation_status=row["moderation_status"],
+        moderation_note=row["moderation_note"],
+        moderated_at=row["moderated_at"].isoformat() if row["moderated_at"] else None,
+        face_count=row["face_count"],
     )
 
 
@@ -341,7 +499,10 @@ async def random_photos(
     year: int | None = None,
 ) -> list[dict]:
     """Return random *image* photos (skip videos) for ambient slideshows."""
-    where = ["coalesce(metadata->>'media_type','image') = 'image'"]
+    where = [
+        "coalesce(metadata->>'media_type','image') = 'image'",
+        "moderation_status = 'approved'",
+    ]
     params: list = []
     if year is not None:
         params.append(year)

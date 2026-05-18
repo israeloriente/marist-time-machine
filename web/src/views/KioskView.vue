@@ -78,25 +78,75 @@ const SEARCH_DURATION_MS = 8000; // animação dura ~8s antes de mostrar resulta
 async function startCamera() {
   phase.value = "loading-camera";
   error.value = null;
+
+  // Make absolutely sure no leftover stream is holding the camera. Some
+  // iOS/Android browsers return "Timeout starting video source" when a
+  // previous track is still in "live" state when getUserMedia is called
+  // again.
+  stopCamera();
+  if (videoEl.value) {
+    try {
+      videoEl.value.pause();
+    } catch { /* ignore */ }
+    videoEl.value.srcObject = null;
+  }
+  // Brief wait gives the underlying driver time to release the device.
+  await new Promise((r) => setTimeout(r, 200));
+
+  // Try progressively more permissive constraints. The kiosk doesn't need
+  // 1280x720 — InsightFace happily works with whatever the camera offers.
+  const attempts: MediaStreamConstraints[] = [
+    { video: { facingMode: "user", width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false },
+    { video: { facingMode: "user" }, audio: false },
+    { video: true, audio: false },
+  ];
+
+  let lastErr: any = null;
+  for (let i = 0; i < attempts.length; i++) {
+    try {
+      stream.value = await navigator.mediaDevices.getUserMedia(attempts[i]);
+      break;
+    } catch (e: any) {
+      lastErr = e;
+      // small back-off between attempts to let the driver settle
+      await new Promise((r) => setTimeout(r, 300));
+    }
+  }
+
+  if (!stream.value) {
+    error.value =
+      "Não foi possível acessar a câmera: " +
+      (lastErr?.message ?? String(lastErr)) +
+      ". Tente sair e voltar a essa página, ou recarregue.";
+    phase.value = "idle";
+    return;
+  }
+
   try {
-    stream.value = await navigator.mediaDevices.getUserMedia({
-      video: { facingMode: "user", width: 1280, height: 720 },
-      audio: false,
-    });
     if (videoEl.value) {
       videoEl.value.srcObject = stream.value;
-      await videoEl.value.play();
+      // play() can throw NotAllowedError on iOS if the gesture chain broke;
+      // we don't care because the user already clicked the CTA.
+      await videoEl.value.play().catch(() => undefined);
     }
     phase.value = "ready";
   } catch (e: any) {
-    error.value = "Não foi possível acessar a câmera: " + (e.message ?? e);
+    error.value = "Erro ao iniciar vídeo: " + (e.message ?? e);
+    stopCamera();
     phase.value = "idle";
   }
 }
 
 function stopCamera() {
-  stream.value?.getTracks().forEach((t) => t.stop());
-  stream.value = null;
+  if (stream.value) {
+    stream.value.getTracks().forEach((t) => {
+      try { t.stop(); } catch { /* ignore */ }
+    });
+    stream.value = null;
+  }
+  if (videoEl.value && videoEl.value.srcObject) {
+    videoEl.value.srcObject = null;
+  }
 }
 
 async function captureSnapshot(): Promise<Blob | null> {

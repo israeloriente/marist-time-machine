@@ -281,6 +281,7 @@ async def person_photos(person_id: UUID, _user: User = CurrentUser) -> list[dict
         from public.photos p
         join public.faces f on f.photo_id = p.id
         where f.person_id = $1
+          and p.moderation_status = 'approved'
         order by p.uploaded_at desc
         """,
         person_id,
@@ -318,6 +319,7 @@ async def person_faces(person_id: UUID, _user: User = CurrentUser) -> list[dict]
         from public.faces f
         join public.photos p on p.id = f.photo_id
         where f.person_id = $1
+          and p.moderation_status = 'approved'
         order by f.detection_score desc nulls last
         """,
         person_id,

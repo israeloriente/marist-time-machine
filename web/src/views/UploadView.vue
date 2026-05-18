@@ -123,10 +123,12 @@ async function processOne(item: QueuedFile) {
     } else {
       item.status = "done";
       item.facesFound = res?.faces?.length ?? 0;
-      item.message =
+      const faceMsg =
         item.facesFound === 0
           ? "nenhum rosto detectado"
-          : `${item.facesFound} ${item.facesFound === 1 ? "rosto" : "rostos"} detectados`;
+          : `${item.facesFound} ${item.facesFound === 1 ? "rosto" : "rostos"}`;
+      // Every upload starts as pending moderation now
+      item.message = `aguardando aprovação · ${faceMsg}`;
     }
   } catch (e: any) {
     if (item.abort?.signal.aborted) {
