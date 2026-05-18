@@ -162,6 +162,10 @@ const userInitial = computed(() => userEmail.value.slice(0, 1).toUpperCase());
 .admin-shell {
   display: grid;
   grid-template-columns: 1fr;
+  /* Explicit rows: topbar takes its natural height, main fills the rest.
+     Without this, on some viewports the topbar can stretch to fill the
+     grid row when no explicit row is declared. */
+  grid-template-rows: auto 1fr;
   min-height: 100vh;
   min-height: 100svh;
   background: var(--bg);
@@ -173,7 +177,15 @@ const userInitial = computed(() => userEmail.value.slice(0, 1).toUpperCase());
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
-  padding: calc(0.7rem + var(--safe-top)) 1rem 0.7rem;
+  /* Cap the safe-area-inset so a misreported value (some PWAs return huge
+     numbers) can't blow up the topbar height. iPhone notch maxes ~50px. */
+  padding-top: calc(0.7rem + min(var(--safe-top), 50px));
+  padding-right: 1rem;
+  padding-bottom: 0.7rem;
+  padding-left: 1rem;
+  min-height: 56px;
+  max-height: calc(56px + min(var(--safe-top), 50px));
+  flex: 0 0 auto;
   background: var(--marista-navy);
   color: var(--marista-white);
   border-bottom: 3px solid var(--marista-yellow);
@@ -225,8 +237,8 @@ const userInitial = computed(() => userEmail.value.slice(0, 1).toUpperCase());
   transition: transform 0.2s ease;
   display: flex;
   flex-direction: column;
-  padding-top: var(--safe-top);
-  padding-bottom: var(--safe-bottom);
+  padding-top: min(var(--safe-top), 50px);
+  padding-bottom: min(var(--safe-bottom), 50px);
 }
 .admin-sidebar.open { transform: translateX(0); }
 
