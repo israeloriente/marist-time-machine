@@ -39,12 +39,9 @@ async function load() {
   loading.value = true;
   error.value = null;
   try {
-    const list = await peopleApi.list();
-    person.value = list.find((p) => p.id === personId) ?? null;
-    if (!person.value) {
-      error.value = "Pessoa não encontrada.";
-      return;
-    }
+    // Use the dedicated endpoint so rejected people are still loadable
+    // (admin needs to be able to view a rejected person to reactivate).
+    person.value = await peopleApi.get(personId);
     renameValue.value = person.value.display_name ?? "";
     yearValue.value = person.value.graduation_year ?? "";
     classValue.value = person.value.class_letter ?? "";
@@ -54,7 +51,11 @@ async function load() {
       suggestionsApi.byPerson(personId).catch(() => []),
     ]);
   } catch (e: any) {
-    error.value = e.response?.data?.detail ?? e.message ?? String(e);
+    if (e.response?.status === 404) {
+      error.value = "Pessoa não encontrada.";
+    } else {
+      error.value = e.response?.data?.detail ?? e.message ?? String(e);
+    }
   } finally {
     loading.value = false;
   }
@@ -146,11 +147,25 @@ async function rejectSuggestion(g: SuggestionGroup) {
   }
 }
 
-async function hidePerson() {
-  if (!confirm("Esconder esta pessoa? Ela não aparecerá na lista admin nem em buscas.")) return;
+async function rejectPerson() {
+  if (
+    !confirm(
+      "Rejeitar esta pessoa? Ela some das buscas e do /contribute, mas pode ser reativada depois pela aba 'Rejeitadas'.",
+    )
+  )
+    return;
   try {
-    await peopleApi.hide(personId, true);
-    router.push({ name: "admin" });
+    const updated = await peopleApi.setStatus(personId, "rejected");
+    if (person.value) person.value.status = updated.status;
+  } catch (e: any) {
+    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  }
+}
+
+async function reactivatePerson() {
+  try {
+    const updated = await peopleApi.setStatus(personId, "active");
+    if (person.value) person.value.status = updated.status;
   } catch (e: any) {
     alert("Erro: " + (e.response?.data?.detail ?? e.message));
   }
@@ -218,9 +233,24 @@ onMounted(load);
         </p>
       </section>
 
+      <div v-if="person?.status === 'rejected'" class="rejected-banner">
+        <strong>Pessoa rejeitada.</strong>
+        Não aparece em buscas nem no /contribute.
+        <button class="link-btn" @click="reactivatePerson">↺ Reativar</button>
+      </div>
+
       <div class="ops">
         <button class="button secondary" @click="openMergePicker">Mesclar com…</button>
-        <button class="button secondary" @click="hidePerson">Esconder</button>
+        <button
+          v-if="person?.status !== 'rejected'"
+          class="button secondary"
+          @click="rejectPerson"
+        >Rejeitar</button>
+        <button
+          v-else
+          class="button"
+          @click="reactivatePerson"
+        >Reativar</button>
       </div>
 
       <PersonPickerDialog
@@ -310,6 +340,32 @@ onMounted(load);
   flex-wrap: wrap;
   margin-top: 0.75rem;
 }
+
+.rejected-banner {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid rgba(214, 58, 58, 0.4);
+  border-radius: 8px;
+  background: rgba(214, 58, 58, 0.08);
+  color: var(--error);
+  font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.rejected-banner strong { font-weight: 700; }
+.rejected-banner .link-btn {
+  background: none;
+  border: none;
+  color: var(--marista-blue);
+  cursor: pointer;
+  font: inherit;
+  font-weight: 600;
+  margin-left: auto;
+  padding: 0;
+}
+.rejected-banner .link-btn:hover { text-decoration: underline; }
 
 .faces-grid {
   display: grid;

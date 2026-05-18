@@ -20,6 +20,7 @@ class PersonOut(BaseModel):
     display_name: str | None
     thumbnail_face_id: UUID | None
     face_count: int
+    status: str = "active"  # 'active' | 'rejected'
     # Canonical graduation info (admin/community-curated)
     graduation_year: int | None = None
     class_letter: str | None = None
@@ -30,7 +31,8 @@ class PersonOut(BaseModel):
 
 class PersonUpdate(BaseModel):
     display_name: str | None = None
-    is_hidden: bool | None = None
+    is_hidden: bool | None = None  # deprecated; prefer status
+    status: str | None = None  # 'active' | 'rejected'
     graduation_year: int | None = None
     class_letter: str | None = None
 
@@ -46,20 +48,21 @@ async def list_people(
     offset: int = 0,
     year: int | None = None,
     klass: str | None = Query(None, alias="class"),
+    status_filter: str = Query("active", alias="status"),
     _user: User = CurrentUser,
 ) -> list[PersonOut]:
     """List people with derived graduation_years + classes from their photos.
 
-    Optional filters:
+    Filters:
+    - status: 'active' (default) or 'rejected' — rejected people are hidden
+      from regular queries but admin can list them to reactivate.
     - year: only people who appear in at least one photo tagged with this year
     - klass: only people who appear in at least one photo of this class (A-F)
-
-    Filters are combinable (both must match within the same photo? No — the
-    current schema doesn't pair year+class per photo strictly. We require
-    each filter independently on any photo of the person.)
     """
-    where_clauses = ["p.is_hidden = false"]
-    params: list = []
+    if status_filter not in {"active", "rejected"}:
+        raise HTTPException(status_code=400, detail="status must be active|rejected")
+    params: list[object] = [status_filter]
+    where_clauses = [f"p.status = $1"]
 
     if year is not None:
         params.append(year)
@@ -101,7 +104,7 @@ async def list_people(
     params.append(limit)
     params.append(offset)
     sql = f"""
-        select p.id, p.display_name, p.thumbnail_face_id,
+        select p.id, p.display_name, p.thumbnail_face_id, p.status,
                p.graduation_year, p.class_letter,
                count(distinct f.id) as face_count,
                coalesce(
@@ -144,6 +147,7 @@ async def list_people(
             display_name=r["display_name"],
             thumbnail_face_id=r["thumbnail_face_id"],
             face_count=r["face_count"],
+            status=r["status"],
             graduation_year=r["graduation_year"],
             class_letter=r["class_letter"],
             graduation_years=sorted(r["graduation_years"]) if r["graduation_years"] else [],
@@ -190,6 +194,24 @@ async def filters_available(_user: User = CurrentUser) -> dict:
     }
 
 
+@router.get("/{person_id}", response_model=PersonOut)
+async def get_person(person_id: UUID, _user: User = CurrentUser) -> PersonOut:
+    """Return a single person regardless of status — admin needs this to
+    view a rejected person before reactivating."""
+    row = await db.fetchrow(
+        """
+        select p.id, p.display_name, p.thumbnail_face_id, p.status,
+               p.graduation_year, p.class_letter,
+               (select count(*) from public.faces f where f.person_id = p.id) as face_count
+        from public.people p where p.id = $1
+        """,
+        person_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="person not found")
+    return PersonOut(**dict(row))
+
+
 @router.patch("/{person_id}", response_model=PersonOut)
 async def update_person(
     person_id: UUID, body: PersonUpdate, _user: User = RequireAdmin
@@ -207,7 +229,14 @@ async def update_person(
     if "display_name" in sent:
         add("display_name", body.display_name)
     if "is_hidden" in sent and body.is_hidden is not None:
-        add("is_hidden", body.is_hidden)
+        # Legacy field — keep working but it maps onto status now.
+        add("status", "rejected" if body.is_hidden else "active")
+    if "status" in sent and body.status is not None:
+        if body.status not in {"active", "rejected"}:
+            raise HTTPException(
+                status_code=400, detail="status must be active|rejected"
+            )
+        add("status", body.status)
     if "graduation_year" in sent:
         add("graduation_year", body.graduation_year)
     if "class_letter" in sent:
@@ -225,7 +254,7 @@ async def update_person(
     )
     row = await db.fetchrow(
         """
-        select p.id, p.display_name, p.thumbnail_face_id,
+        select p.id, p.display_name, p.thumbnail_face_id, p.status,
                p.graduation_year, p.class_letter,
                (select count(*) from public.faces f where f.person_id = p.id) as face_count
         from public.people p where p.id = $1

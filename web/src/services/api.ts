@@ -235,6 +235,7 @@ export interface Person {
   display_name: string | null;
   thumbnail_face_id: string | null;
   face_count: number;
+  status?: "active" | "rejected";
   // Canonical (admin/community-curated)
   graduation_year?: number | null;
   class_letter?: string | null;
@@ -246,6 +247,7 @@ export interface Person {
 export interface PeopleFilters {
   year?: number;
   class?: string;
+  status?: "active" | "rejected";
 }
 
 export interface AvailableFilters {
@@ -294,8 +296,11 @@ export const peopleApi = {
     const params: Record<string, string | number> = {};
     if (filters.year !== undefined) params.year = filters.year;
     if (filters.class) params.class = filters.class;
+    if (filters.status) params.status = filters.status;
     return (await api.get<Person[]>("/people", { params })).data;
   },
+  get: async (personId: string): Promise<Person> =>
+    (await api.get<Person>(`/people/${personId}`)).data,
   filters: async (): Promise<AvailableFilters> =>
     (await api.get<AvailableFilters>("/people/filters")).data,
   stats: async (): Promise<ClusterStats> => (await api.get<ClusterStats>("/people/stats")).data,
@@ -307,8 +312,11 @@ export const peopleApi = {
     (await api.get<PersonPhoto[]>(`/people/${personId}/photos`)).data,
   rename: async (personId: string, display_name: string | null): Promise<Person> =>
     (await api.patch<Person>(`/people/${personId}`, { display_name })).data,
-  hide: async (personId: string, is_hidden: boolean): Promise<Person> =>
-    (await api.patch<Person>(`/people/${personId}`, { is_hidden })).data,
+  setStatus: async (
+    personId: string,
+    status: "active" | "rejected",
+  ): Promise<Person> =>
+    (await api.patch<Person>(`/people/${personId}`, { status })).data,
   updateGraduation: async (
     personId: string,
     graduation_year: number | null,

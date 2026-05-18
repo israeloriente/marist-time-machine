@@ -79,9 +79,12 @@ async def search_by_face(
     candidate_rows = await db.fetch(
         """
         with nearest as (
-          select person_id, embedding <=> $1 as distance
-          from public.faces
-          where person_id is not null and embedding <=> $1 <= $2
+          select f.person_id, f.embedding <=> $1 as distance
+          from public.faces f
+          join public.people p on p.id = f.person_id
+          where f.person_id is not null
+            and p.status = 'active'
+            and f.embedding <=> $1 <= $2
           order by distance asc
           limit 50
         )
@@ -107,7 +110,9 @@ async def search_by_face(
                    f.embedding <=> $1 as distance
             from public.faces f
             join public.photos p on p.id = f.photo_id
+            left join public.people pp on pp.id = f.person_id
             where p.moderation_status = 'approved'
+              and (pp.status is null or pp.status = 'active')
             order by distance asc
             limit $2
             """,

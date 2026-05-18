@@ -13,6 +13,7 @@ const thumbCache = ref<Record<string, Face | null>>({});
 const query = ref("");
 const year = ref<number | "">("");
 const klass = ref<string>("");
+const status = ref<"active" | "rejected">("active");
 const available = ref<AvailableFilters>({ years: [], classes: [] });
 
 // Drag state
@@ -31,7 +32,9 @@ async function loadFilters() {
 async function load() {
   loading.value = true;
   try {
-    const filters: { year?: number; class?: string } = {};
+    const filters: { year?: number; class?: string; status?: "active" | "rejected" } = {
+      status: status.value,
+    };
     if (year.value !== "") filters.year = year.value;
     if (klass.value) filters.class = klass.value;
     people.value = await peopleApi.list(filters);
@@ -148,7 +151,18 @@ function goToPerson(p: Person, e: MouseEvent) {
   router.push({ name: "person", params: { id: p.id } });
 }
 
-watch([year, klass], load);
+async function reactivatePerson(p: Person, e: MouseEvent) {
+  e.stopPropagation();
+  try {
+    await peopleApi.setStatus(p.id, "active");
+    // Optimistic: drop from the rejected list immediately
+    people.value = people.value.filter((x) => x.id !== p.id);
+  } catch (err: any) {
+    alert("Erro: " + (err.response?.data?.detail ?? err.message));
+  }
+}
+
+watch([year, klass, status], load);
 
 onMounted(async () => {
   await Promise.all([loadFilters(), load()]);
@@ -167,6 +181,15 @@ onMounted(async () => {
       </p>
     </div>
   </header>
+
+  <div class="tabs">
+    <button :class="{ active: status === 'active' }" @click="status = 'active'">
+      Ativas
+    </button>
+    <button :class="{ active: status === 'rejected' }" @click="status = 'rejected'">
+      Rejeitadas
+    </button>
+  </div>
 
   <section class="filters card">
     <div class="filter-grid">
@@ -242,6 +265,12 @@ onMounted(async () => {
           <span v-for="y in p.graduation_years" :key="`y-${y}`" class="tag tag-year">{{ y }}</span>
           <span v-for="c in p.classes" :key="`c-${c}`" class="tag tag-class">{{ c }}</span>
         </div>
+        <button
+          v-if="status === 'rejected'"
+          type="button"
+          class="button small reactivate"
+          @click="reactivatePerson(p, $event)"
+        >↺ Reativar</button>
       </div>
     </div>
   </div>
@@ -360,5 +389,35 @@ onMounted(async () => {
 .tag-class {
   background: rgba(247, 201, 72, 0.18);
   color: #8a6913;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.25rem;
+  border-bottom: 1px solid var(--border);
+  margin: 0 0 1rem;
+  overflow-x: auto;
+}
+.tabs button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  padding: 0.65rem 1rem;
+  cursor: pointer;
+  font: inherit;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+}
+.tabs button.active {
+  color: var(--marista-navy);
+  border-bottom-color: var(--marista-yellow);
+  font-weight: 700;
+}
+
+.button.small.reactivate {
+  margin-top: 0.4rem;
+  min-height: 32px;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.78rem;
 }
 </style>
