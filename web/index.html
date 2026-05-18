@@ -6,8 +6,64 @@
     <meta name="theme-color" content="#0c2c4f" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>Marist Time Machine</title>
+    <style>
+      /* Inline splash: ships in the initial HTML so it paints BEFORE the
+         Vue bundle even starts downloading. Stays visible until the app
+         calls document.body.classList.add('app-ready'). */
+      html, body { margin: 0; background: #0c2c4f; }
+      #mtm-splash {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        background: linear-gradient(180deg, #0c2c4f 0%, #0a1f3a 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 1.5rem;
+        color: #f7c948;
+        font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        opacity: 1;
+        transition: opacity 0.5s ease;
+      }
+      body.app-ready #mtm-splash {
+        opacity: 0;
+        pointer-events: none;
+      }
+      #mtm-splash .dot {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #f7c948;
+        animation: mtm-pulse 1.4s ease-in-out infinite;
+      }
+      #mtm-splash .label {
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        font-size: 0.85rem;
+        color: rgba(255, 255, 255, 0.55);
+      }
+      #mtm-splash .title {
+        color: #ffffff;
+        font-weight: 800;
+        font-size: 1.25rem;
+        letter-spacing: 0.02em;
+      }
+      @keyframes mtm-pulse {
+        0%, 100% { transform: scale(1);   opacity: 1; }
+        50%      { transform: scale(1.5); opacity: 0.5; }
+      }
+    </style>
   </head>
   <body>
+    <!-- Visible immediately, even before Vue boots -->
+    <div id="mtm-splash" aria-hidden="true">
+      <div class="dot"></div>
+      <div class="title">Marist Time Machine</div>
+      <div class="label">carregando…</div>
+    </div>
+
     <div id="app"></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
