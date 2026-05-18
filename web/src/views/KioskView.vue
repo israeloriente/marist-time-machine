@@ -23,12 +23,16 @@ const error = ref<string | null>(null);
 
 // Reveal phase: drip photos one at a time
 const revealIdx = ref(0);
-const revealLoaded = ref(false);    // true once current photo has decoded
 let revealTimer: number | null = null;
-let revealSafetyTimer: number | null = null;
 const PHOTO_REVEAL_MS = 4000;       // hold each photo this long AFTER it loads
-const MAX_LOAD_WAIT_MS = 8000;      // give up waiting for a slow image
+const MAX_DECODE_WAIT_MS = 10_000;  // skip an image if it can't decode in 10s
 const MAX_REVEAL_PHOTOS = 12;       // cap reveal duration; rest goes to grid
+
+// Cache of fully-decoded images keyed by photo_id. When the <img> in the
+// DOM gets the same src, it paints synchronously from this cache instead
+// of going through another load+decode cycle.
+const decodedCache = new Map<string, HTMLImageElement>();
+const decodingPromises = new Map<string, Promise<boolean>>();
 
 const currentYear = new Date().getFullYear();
 const years = Array.from({ length: 60 }, (_, i) => currentYear - i);
@@ -341,75 +345,154 @@ async function startJourney() {
   }
 }
 
-const PRELOAD_MAX_WAIT_MS = 6000;
+const PRELOAD_MAX_WAIT_MS = 8000;
 
-function preloadAllRevealPhotos(items: { signed_url: string; thumb_signed_url?: string | null }[]): Promise<void> {
-  const loads = items.map(
-    (p) =>
-      new Promise<void>((resolve) => {
-        const img = new Image();
-        const done = () => resolve();
-        img.onload = done;
-        img.onerror = done;
-        img.src = p.thumb_signed_url || p.signed_url;
-      }),
-  );
-  const all = Promise.allSettled(loads).then(() => undefined);
+interface PreloadablePhoto {
+  photo_id: string;
+  signed_url: string;
+  thumb_signed_url?: string | null;
+}
+
+function pickUrl(p: PreloadablePhoto): string {
+  return p.thumb_signed_url || p.signed_url;
+}
+
+/**
+ * Decode an image fully (pixels ready to paint) and stash it in the cache.
+ * Returns true on success, false on error. Idempotent: concurrent calls
+ * for the same id share a single in-flight promise.
+ */
+function decodeOne(p: PreloadablePhoto): Promise<boolean> {
+  const existing = decodingPromises.get(p.photo_id);
+  if (existing) return existing;
+  if (decodedCache.has(p.photo_id)) return Promise.resolve(true);
+
+  const url = pickUrl(p);
+  const img = new Image();
+  // Hint the browser to decode off the main thread.
+  img.decoding = "async";
+  img.src = url;
+
+  const promise = (async () => {
+    try {
+      // HTMLImageElement.decode() resolves only when the image is fully
+      // decoded and ready to paint — much stronger guarantee than `load`.
+      await img.decode();
+      decodedCache.set(p.photo_id, img);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      decodingPromises.delete(p.photo_id);
+    }
+  })();
+
+  decodingPromises.set(p.photo_id, promise);
+  return promise;
+}
+
+function preloadAllRevealPhotos(items: PreloadablePhoto[]): Promise<void> {
+  // Kick off every decode in parallel; resolve when all settle OR the
+  // overall budget elapses. The decodes keep going in the background
+  // either way — anything that misses the budget will likely be ready
+  // by the time the reveal walks to it.
+  const all = Promise.allSettled(items.map(decodeOne)).then(() => undefined);
   const timeout = new Promise<void>((r) => setTimeout(r, PRELOAD_MAX_WAIT_MS));
   return Promise.race([all, timeout]);
+}
+
+/** Wait up to `timeoutMs` for the photo to decode. Returns true if it did. */
+function waitForDecode(p: PreloadablePhoto, timeoutMs: number): Promise<boolean> {
+  if (decodedCache.has(p.photo_id)) return Promise.resolve(true);
+  return new Promise<boolean>((resolve) => {
+    let settled = false;
+    const timer = window.setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      resolve(false);
+    }, timeoutMs);
+    decodeOne(p).then((ok) => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timer);
+      resolve(ok);
+    });
+  });
 }
 
 function totalReveal(): number {
   return Math.min(result.value?.photos.length ?? 0, MAX_REVEAL_PHOTOS);
 }
 
-function startReveal() {
+async function startReveal() {
   // Tear down any prior reveal cleanly
   stopReveal();
-
-  phase.value = "reveal";
-  revealIdx.value = 0;
-  revealLoaded.value = false;
 
   if (totalReveal() === 0) {
     phase.value = "results";
     return;
   }
 
-  // First photo: starts a safety timer that advances if the image takes
-  // too long to decode. Once the <img> fires `load`, onPhotoLoaded() takes
-  // over and schedules the regular PHOTO_REVEAL_MS hold.
-  armSafetyTimer();
-  preloadNext();
-}
+  // Make sure the FIRST photo is fully decoded before we even enter the
+  // reveal phase — this is what kills the "skeleton flashes then jumps to
+  // the next" feeling. The preload pass already started this; we just
+  // wait for it to finish (with a safety cap).
+  const first = result.value?.photos[0];
+  if (first) {
+    await waitForDecode(first, MAX_DECODE_WAIT_MS);
+  }
 
-/** Called by the <img>'s @load — we know it's painted on screen now. */
-function onPhotoLoaded() {
-  if (phase.value !== "reveal" || revealLoaded.value) return;
-  clearSafetyTimer();
-  revealLoaded.value = true;
+  phase.value = "reveal";
+  revealIdx.value = 0;
+
+  // Prime the lookahead: start decoding photo #1 in parallel with showing #0
+  primeLookahead();
+
   scheduleAdvance(PHOTO_REVEAL_MS);
-  preloadNext();
 }
 
-/** Called by the <img>'s @error — skip it instead of getting stuck. */
-function onPhotoError() {
-  if (phase.value !== "reveal") return;
-  clearSafetyTimer();
-  // Move on immediately — we don't want to stare at a broken photo.
-  scheduleAdvance(300);
+function primeLookahead() {
+  // Kick off decode of the next 2 photos so by the time we advance,
+  // they're already painted in cache. We do 2 instead of 1 to absorb
+  // jitter on slow links.
+  for (let lookahead = 1; lookahead <= 2; lookahead++) {
+    const p = result.value?.photos[revealIdx.value + lookahead];
+    if (p) decodeOne(p);
+  }
 }
 
-function advanceReveal() {
+async function advanceReveal() {
   if (phase.value !== "reveal") return;
   const total = totalReveal();
-  if (revealIdx.value < total - 1) {
-    revealIdx.value += 1;
-    revealLoaded.value = false;
-    armSafetyTimer();
-  } else {
+  if (revealIdx.value >= total - 1) {
     phase.value = "results";
+    return;
   }
+
+  const nextIdx = revealIdx.value + 1;
+  const next = result.value?.photos[nextIdx];
+  if (!next) {
+    phase.value = "results";
+    return;
+  }
+
+  // Wait until the next photo is actually decoded before switching to it.
+  // If it doesn't decode within budget, skip to the one after that —
+  // never sit on a skeleton.
+  const ok = await waitForDecode(next, MAX_DECODE_WAIT_MS);
+  if (phase.value !== "reveal") return; // user navigated away
+
+  if (!ok) {
+    // Skip this photo: bump idx silently and try the next one.
+    revealIdx.value = nextIdx;
+    primeLookahead();
+    advanceReveal();
+    return;
+  }
+
+  revealIdx.value = nextIdx;
+  primeLookahead();
+  scheduleAdvance(PHOTO_REVEAL_MS);
 }
 
 function scheduleAdvance(delayMs: number) {
@@ -420,38 +503,10 @@ function scheduleAdvance(delayMs: number) {
   }, delayMs);
 }
 
-function armSafetyTimer() {
-  clearSafetyTimer();
-  revealSafetyTimer = window.setTimeout(() => {
-    revealSafetyTimer = null;
-    // Image never fired load within budget — advance anyway so the user
-    // doesn't sit on a skeleton forever.
-    if (!revealLoaded.value && phase.value === "reveal") {
-      advanceReveal();
-    }
-  }, MAX_LOAD_WAIT_MS);
-}
-
-function preloadNext() {
-  const next = result.value?.photos[revealIdx.value + 1];
-  if (!next) return;
-  const url = next.thumb_signed_url || next.signed_url;
-  const img = new Image();
-  // browser will decode + cache; when the <img> in the DOM picks the same
-  // URL it's served from cache and fires @load almost instantly.
-  img.src = url;
-}
-
 function clearAdvanceTimer() {
   if (revealTimer !== null) {
     window.clearTimeout(revealTimer);
     revealTimer = null;
-  }
-}
-function clearSafetyTimer() {
-  if (revealSafetyTimer !== null) {
-    window.clearTimeout(revealSafetyTimer);
-    revealSafetyTimer = null;
   }
 }
 
@@ -462,8 +517,6 @@ function skipReveal() {
 
 function stopReveal() {
   clearAdvanceTimer();
-  clearSafetyTimer();
-  revealLoaded.value = false;
 }
 
 const currentRevealPhoto = computed(() => {
@@ -479,6 +532,8 @@ function reset() {
   stopCamera();
   stopSlideshow();
   stopReveal();
+  decodedCache.clear();
+  decodingPromises.clear();
   result.value = null;
   photos.value = [];
   yearPhotos.value = [];
@@ -631,11 +686,9 @@ onBeforeUnmount(() => {
           <div
             v-if="currentRevealPhoto"
             :key="currentRevealPhoto.photo_id"
-            class="reveal-frame"
-            :class="{ 'ken-burns-slow': revealLoaded }"
+            class="reveal-frame ken-burns-slow"
           >
             <div
-              v-if="revealLoaded"
               class="reveal-bg"
               :style="{
                 backgroundImage: `url(${
@@ -645,17 +698,10 @@ onBeforeUnmount(() => {
             />
             <img
               :src="currentRevealPhoto.thumb_signed_url || currentRevealPhoto.signed_url"
-              class="reveal-fg"
-              :class="{ 'is-loaded': revealLoaded }"
+              class="reveal-fg is-loaded"
               alt=""
-              decoding="async"
-              @load="onPhotoLoaded"
-              @error="onPhotoError"
+              decoding="sync"
             />
-            <div v-if="!revealLoaded" class="reveal-skeleton">
-              <div class="skeleton-shimmer" />
-              <p class="skeleton-text">Carregando memória…</p>
-            </div>
           </div>
         </transition-group>
 
