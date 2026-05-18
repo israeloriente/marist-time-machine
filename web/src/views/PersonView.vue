@@ -5,9 +5,11 @@ import FaceThumb from "@/components/FaceThumb.vue";
 import {
   facesApi,
   peopleApi,
+  suggestionsApi,
   type Face,
   type Person,
   type PersonPhoto,
+  type SuggestionGroup,
 } from "@/services/api";
 
 const route = useRoute();
@@ -17,6 +19,7 @@ const personId = route.params.id as string;
 const person = ref<Person | null>(null);
 const faces = ref<Face[]>([]);
 const photos = ref<PersonPhoto[]>([]);
+const suggestions = ref<SuggestionGroup[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
 const renameValue = ref("");
@@ -33,9 +36,10 @@ async function load() {
       return;
     }
     renameValue.value = person.value.display_name ?? "";
-    [faces.value, photos.value] = await Promise.all([
+    [faces.value, photos.value, suggestions.value] = await Promise.all([
       peopleApi.faces(personId),
       peopleApi.photos(personId),
+      suggestionsApi.byPerson(personId).catch(() => []),
     ]);
   } catch (e: any) {
     error.value = e.response?.data?.detail ?? e.message ?? String(e);
@@ -84,6 +88,29 @@ async function mergeWith() {
   try {
     await peopleApi.merge(personId, others[idx].id);
     router.push({ name: "person", params: { id: others[idx].id } });
+  } catch (e: any) {
+    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  }
+}
+
+async function approveSuggestion(g: SuggestionGroup) {
+  // Use the first (newest) suggestion id; admin may edit the name.
+  const final = prompt("Aprovar com qual nome?", g.suggested_name)?.trim();
+  if (final === undefined) return;
+  try {
+    await suggestionsApi.approve(g.suggestion_ids[0], final || undefined);
+    // Refresh
+    await load();
+  } catch (e: any) {
+    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  }
+}
+
+async function rejectSuggestion(g: SuggestionGroup) {
+  if (!confirm(`Rejeitar "${g.suggested_name}" (${g.vote_count} ${g.vote_count === 1 ? "voto" : "votos"})?`)) return;
+  try {
+    await suggestionsApi.reject(g.suggestion_ids[0]);
+    suggestions.value = suggestions.value.filter((s) => s !== g);
   } catch (e: any) {
     alert("Erro: " + (e.response?.data?.detail ?? e.message));
   }
@@ -138,6 +165,25 @@ onMounted(load);
       <div class="ops">
         <button class="button secondary" @click="mergeWith">Mesclar com…</button>
         <button class="button secondary" @click="hidePerson">Esconder</button>
+      </div>
+
+      <!-- Pending name suggestions -->
+      <div v-if="suggestions.length" class="suggestions">
+        <h3>Sugestões pendentes</h3>
+        <ul class="sugg-list">
+          <li v-for="g in suggestions" :key="g.suggestion_ids[0]" class="sugg-item">
+            <div class="sugg-info">
+              <strong>{{ g.suggested_name }}</strong>
+              <span class="muted small">
+                {{ g.vote_count }} {{ g.vote_count === 1 ? "voto" : "votos" }}
+              </span>
+            </div>
+            <div class="sugg-ops">
+              <button class="button small" @click="approveSuggestion(g)">Aprovar</button>
+              <button class="button small secondary" @click="rejectSuggestion(g)">Rejeitar</button>
+            </div>
+          </li>
+        </ul>
       </div>
 
       <h3 style="margin-top: 1.5rem">Rostos atribuídos</h3>
@@ -223,4 +269,32 @@ onMounted(load);
   border-radius: 8px; background: #1a2c4e;
 }
 .small { font-size: 0.85rem; }
+
+.suggestions {
+  margin-top: 1.25rem;
+  padding: 0.75rem;
+  background: rgba(255, 211, 78, 0.08);
+  border: 1px solid rgba(255, 211, 78, 0.3);
+  border-radius: 10px;
+}
+.suggestions h3 { margin: 0 0 0.5rem; font-size: 1rem; }
+.sugg-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.4rem; }
+.sugg-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: rgba(11,31,58,0.5);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+.sugg-info { display: flex; flex-direction: column; min-width: 0; }
+.sugg-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sugg-ops { display: flex; gap: 0.35rem; }
+.button.small {
+  min-height: 32px;
+  padding: 0.3rem 0.7rem;
+  font-size: 0.85rem;
+}
 </style>

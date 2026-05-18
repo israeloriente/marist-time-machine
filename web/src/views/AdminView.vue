@@ -6,13 +6,15 @@ import {
   dedupePhotos,
   facesApi,
   peopleApi,
+  suggestionsApi,
   type ClusterStats,
   type Face,
   type Person,
   type ReclusterStatus,
+  type SuggestionGroup,
 } from "@/services/api";
 
-type Tab = "people" | "unassigned" | "status";
+type Tab = "people" | "unassigned" | "suggestions" | "status";
 const tab = ref<Tab>("people");
 
 const stats = ref<ClusterStats | null>(null);
@@ -27,6 +29,12 @@ const unassigned = ref<Face[]>([]);
 const unassignedLoading = ref(false);
 const unassignedOffset = ref(0);
 const unassignedMore = ref(true);
+
+const allSuggestions = ref<SuggestionGroup[]>([]);
+const suggestionsLoading = ref(false);
+// Indexed lookup for thumbnails on suggestions
+const personById = ref<Record<string, Person>>({});
+const faceById = ref<Record<string, Face>>({});
 
 // Cache: person_id -> first face (to render thumb)
 const thumbCache = ref<Record<string, Face | null>>({});
@@ -165,9 +173,64 @@ onMounted(async () => {
   await loadPeople();
 });
 
+async function loadSuggestions() {
+  suggestionsLoading.value = true;
+  try {
+    allSuggestions.value = await suggestionsApi.pending();
+    // Pre-fetch person/face thumbs we'll need
+    const personIds = new Set<string>();
+    const faceIds = new Set<string>();
+    for (const g of allSuggestions.value) {
+      if (g.person_id) personIds.add(g.person_id);
+      if (g.face_id) faceIds.add(g.face_id);
+    }
+    // People we already have from loadPeople; just index them
+    for (const p of people.value) personById.value[p.id] = p;
+    // For each person, grab a face (cache via thumbCache)
+    await Promise.all(
+      [...personIds].map(async (pid) => {
+        if (thumbCache.value[pid]) return;
+        try {
+          const fs = await peopleApi.faces(pid);
+          thumbCache.value[pid] = fs[0] ?? null;
+        } catch {
+          thumbCache.value[pid] = null;
+        }
+      }),
+    );
+    // For orphan faces, fetch them via unassigned listing (we already loaded some).
+    // If a face isn't in the unassigned cache, skip thumb (still show name + count).
+    for (const f of unassigned.value) faceById.value[f.id] = f;
+  } finally {
+    suggestionsLoading.value = false;
+  }
+}
+
+async function approveSuggestion(g: SuggestionGroup) {
+  const final = prompt("Aprovar com qual nome?", g.suggested_name)?.trim();
+  if (final === undefined) return;
+  try {
+    await suggestionsApi.approve(g.suggestion_ids[0], final || undefined);
+    await Promise.all([loadStats(), loadPeople(), loadSuggestions()]);
+  } catch (e: any) {
+    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  }
+}
+
+async function rejectSuggestion(g: SuggestionGroup) {
+  if (!confirm(`Rejeitar "${g.suggested_name}"?`)) return;
+  try {
+    await suggestionsApi.reject(g.suggestion_ids[0]);
+    allSuggestions.value = allSuggestions.value.filter((s) => s !== g);
+  } catch (e: any) {
+    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  }
+}
+
 function switchTab(t: Tab) {
   tab.value = t;
   if (t === "unassigned" && !unassigned.value.length) loadUnassigned(true);
+  if (t === "suggestions" && !allSuggestions.value.length) loadSuggestions();
 }
 </script>
 
@@ -205,6 +268,9 @@ function switchTab(t: Tab) {
       <button :class="{ active: tab === 'people' }" @click="switchTab('people')">Pessoas</button>
       <button :class="{ active: tab === 'unassigned' }" @click="switchTab('unassigned')">
         Não atribuídos
+      </button>
+      <button :class="{ active: tab === 'suggestions' }" @click="switchTab('suggestions')">
+        Sugestões
       </button>
       <button :class="{ active: tab === 'status' }" @click="switchTab('status')">Status</button>
     </div>
@@ -259,6 +325,54 @@ function switchTab(t: Tab) {
           {{ unassignedLoading ? "Carregando…" : "Carregar mais" }}
         </button>
       </div>
+    </div>
+
+    <!-- Suggestions tab -->
+    <div v-else-if="tab === 'suggestions'">
+      <p v-if="suggestionsLoading && !allSuggestions.length" class="muted">Carregando…</p>
+      <p v-else-if="!allSuggestions.length" class="muted small">
+        Nenhuma sugestão pendente.
+      </p>
+      <ul v-else class="sugg-list">
+        <li v-for="g in allSuggestions" :key="g.suggestion_ids[0]" class="sugg-row">
+          <div class="sugg-target">
+            <template v-if="g.person_id && thumbCache[g.person_id]">
+              <FaceThumb
+                :src="thumbCache[g.person_id]!.signed_url"
+                :bbox="thumbCache[g.person_id]!.bbox"
+                :size="56"
+                :padding="0.3"
+              />
+            </template>
+            <template v-else-if="g.face_id && faceById[g.face_id]">
+              <FaceThumb
+                :src="faceById[g.face_id].signed_url"
+                :bbox="faceById[g.face_id].bbox"
+                :size="56"
+                :padding="0.3"
+              />
+            </template>
+            <div v-else class="thumb-placeholder" style="width:56px;height:56px">?</div>
+
+            <div class="sugg-meta">
+              <strong>{{ g.suggested_name }}</strong>
+              <span class="muted small">
+                {{ g.vote_count }} {{ g.vote_count === 1 ? "voto" : "votos" }}
+                · {{ g.person_id ? "pessoa" : "rosto avulso" }}
+              </span>
+            </div>
+          </div>
+          <div class="sugg-ops">
+            <button class="button small" @click="approveSuggestion(g)">Aprovar</button>
+            <button class="button small secondary" @click="rejectSuggestion(g)">Rejeitar</button>
+            <RouterLink
+              v-if="g.person_id"
+              :to="{ name: 'person', params: { id: g.person_id } }"
+              class="muted small"
+            >ver pessoa →</RouterLink>
+          </div>
+        </li>
+      </ul>
     </div>
 
     <!-- Status do cron -->
@@ -399,6 +513,41 @@ function switchTab(t: Tab) {
   font-size: 0.85rem;
 }
 .small { font-size: 0.75rem; }
+
+.sugg-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.sugg-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.6rem;
+  background: rgba(11,31,58,0.4);
+  border: 1px solid #1d3258;
+  border-radius: 10px;
+}
+.sugg-target {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+  flex: 1 1 200px;
+}
+.sugg-meta { display: flex; flex-direction: column; min-width: 0; }
+.sugg-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sugg-ops {
+  display: flex;
+  gap: 0.4rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
 
 .status-list { margin: 0; }
 .status-list dt {
