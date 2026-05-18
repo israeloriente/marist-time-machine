@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import FaceThumb from "@/components/FaceThumb.vue";
+import PersonPickerDialog from "@/components/PersonPickerDialog.vue";
 import {
   facesApi,
   peopleApi,
@@ -71,23 +72,19 @@ async function detachFace(face: Face) {
   }
 }
 
-async function mergeWith() {
-  const list = await peopleApi.list();
-  const others = list.filter((p) => p.id !== personId);
-  if (!others.length) {
-    alert("Não há outras pessoas pra mesclar.");
-    return;
-  }
-  const choices = others
-    .map((p, i) => `${i + 1}. ${p.display_name || `Pessoa ${p.id.slice(0, 8)}`} (${p.face_count})`)
-    .join("\n");
-  const raw = prompt(`Mesclar TODOS os rostos desta pessoa em qual outra?\n${choices}\n\nNº:`);
-  const idx = raw ? parseInt(raw, 10) - 1 : -1;
-  if (idx < 0 || idx >= others.length) return;
-  if (!confirm(`Confirma mesclar em "${others[idx].display_name || others[idx].id.slice(0, 8)}"? Esta pessoa será apagada.`)) return;
+const showMergePicker = ref(false);
+
+function openMergePicker() {
+  showMergePicker.value = true;
+}
+
+async function onMergePick(target: Person) {
+  const targetName = target.display_name || `Pessoa ${target.id.slice(0, 8)}`;
+  if (!confirm(`Mesclar TODOS os rostos desta pessoa em "${targetName}"?\n\nEsta pessoa será apagada.`)) return;
   try {
-    await peopleApi.merge(personId, others[idx].id);
-    router.push({ name: "person", params: { id: others[idx].id } });
+    await peopleApi.merge(personId, target.id);
+    showMergePicker.value = false;
+    router.push({ name: "person", params: { id: target.id } });
   } catch (e: any) {
     alert("Erro: " + (e.response?.data?.detail ?? e.message));
   }
@@ -163,9 +160,18 @@ onMounted(load);
       </div>
 
       <div class="ops">
-        <button class="button secondary" @click="mergeWith">Mesclar com…</button>
+        <button class="button secondary" @click="openMergePicker">Mesclar com…</button>
         <button class="button secondary" @click="hidePerson">Esconder</button>
       </div>
+
+      <PersonPickerDialog
+        :open="showMergePicker"
+        title="Mesclar em qual pessoa?"
+        confirm-label="Mesclar"
+        :exclude-id="personId"
+        @close="showMergePicker = false"
+        @pick="onMergePick"
+      />
 
       <!-- Pending name suggestions -->
       <div v-if="suggestions.length" class="suggestions">

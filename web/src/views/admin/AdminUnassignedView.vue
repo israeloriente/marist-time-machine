@@ -1,12 +1,15 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import FaceThumb from "@/components/FaceThumb.vue";
-import { facesApi, peopleApi, type Face } from "@/services/api";
+import PersonPickerDialog from "@/components/PersonPickerDialog.vue";
+import { facesApi, type Face, type Person } from "@/services/api";
 
 const unassigned = ref<Face[]>([]);
 const loading = ref(false);
 const offset = ref(0);
 const hasMore = ref(true);
+const showAssignPicker = ref(false);
+const faceBeingAssigned = ref<Face | null>(null);
 
 async function load(reset = false) {
   if (reset) {
@@ -36,17 +39,19 @@ async function promoteToPerson(face: Face) {
   }
 }
 
-async function assignFaceToPerson(face: Face) {
-  const ppl = await peopleApi.list();
-  const choices = ppl
-    .map((p, i) => `${i + 1}. ${p.display_name || `Pessoa ${p.id.slice(0, 8)}`} (${p.face_count})`)
-    .join("\n");
-  const raw = prompt(`Atribuir esse rosto a qual pessoa?\n${choices}\n\nNº:`);
-  const idx = raw ? parseInt(raw, 10) - 1 : -1;
-  if (idx < 0 || idx >= ppl.length) return;
+function openAssignPicker(face: Face) {
+  faceBeingAssigned.value = face;
+  showAssignPicker.value = true;
+}
+
+async function onAssignPick(person: Person) {
+  const face = faceBeingAssigned.value;
+  if (!face) return;
   try {
-    await facesApi.reassign(face.id, ppl[idx].id);
+    await facesApi.reassign(face.id, person.id);
     unassigned.value = unassigned.value.filter((f) => f.id !== face.id);
+    showAssignPicker.value = false;
+    faceBeingAssigned.value = null;
   } catch (e: any) {
     alert("Erro: " + (e.response?.data?.detail ?? e.message));
   }
@@ -73,7 +78,7 @@ onMounted(() => load(true));
       <span class="muted small">{{ (f.detection_score * 100).toFixed(0) }}%</span>
       <div class="actions">
         <button class="button small" @click="promoteToPerson(f)" title="Nova pessoa">+ Nova</button>
-        <button class="button small secondary" @click="assignFaceToPerson(f)" title="Atribuir">→ Existente</button>
+        <button class="button small secondary" @click="openAssignPicker(f)" title="Atribuir">→ Existente</button>
       </div>
     </div>
   </div>
@@ -82,6 +87,14 @@ onMounted(() => load(true));
       {{ loading ? "Carregando…" : "Carregar mais" }}
     </button>
   </div>
+
+  <PersonPickerDialog
+    :open="showAssignPicker"
+    title="Atribuir a qual pessoa?"
+    confirm-label="Atribuir"
+    @close="showAssignPicker = false"
+    @pick="onAssignPick"
+  />
 </template>
 
 <style scoped>
