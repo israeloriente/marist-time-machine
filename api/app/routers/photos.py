@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 from .. import db
 from ..deps import CurrentUser, User
-from ..services import storage, video
+from ..services import media, storage, video
 from ..services.clustering import assign_face_to_person
 from ..services.ml_client import ml_client
 
@@ -59,13 +59,28 @@ async def upload_photo(
     except json.JSONDecodeError as exc:
         raise HTTPException(status_code=400, detail=f"invalid metadata_json: {exc}") from exc
 
-    payload = await file.read()
-    if not payload:
+    raw_payload = await file.read()
+    if not raw_payload:
         raise HTTPException(status_code=400, detail="empty file")
 
     metadata["media_type"] = "video" if is_video else "image"
+    original_size = len(raw_payload)
 
-    # 1. Dedupe check by content hash (SHA-256 of the raw bytes)
+    # 1. Compress server-side BEFORE hashing. The hash represents what we
+    #    actually store, so dedupe sees byte-identical re-uploads of the
+    #    same compressed bytes (e.g. user uploads the same JPEG twice).
+    upload_content_type = file.content_type or "application/octet-stream"
+    upload_ext = ""
+    if is_image:
+        payload, upload_content_type, upload_ext = media.compress_image(raw_payload)
+    elif is_video:
+        payload, upload_content_type, upload_ext = await media.compress_video(raw_payload)
+    else:
+        payload = raw_payload
+
+    metadata["original_size_bytes"] = original_size
+    metadata["compressed_size_bytes"] = len(payload)
+
     content_hash = hashlib.sha256(payload).hexdigest()
     existing = await db.fetchrow(
         """
@@ -87,13 +102,18 @@ async def upload_photo(
             duplicate=True,
         )
 
-    # 2. Persist original to Supabase Storage
+    # 2. Persist compressed bytes to Supabase Storage.
     safe_name = file.filename or ("upload.mp4" if is_video else "upload.jpg")
+    if upload_ext:
+        # Compression changed the encoding — swap the extension so the
+        # stored object's name matches its actual bytes.
+        root, _, _ = safe_name.rpartition(".")
+        safe_name = (root or safe_name) + upload_ext
     path = f"{user.id}/{safe_name}"
     storage.storage_client().storage.from_("photos").upload(
         path,
         payload,
-        {"content-type": file.content_type or "application/octet-stream", "upsert": "true"},
+        {"content-type": upload_content_type, "upsert": "true"},
     )
 
     # 3. Insert photo row (with content_hash)
