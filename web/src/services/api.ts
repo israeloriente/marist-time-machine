@@ -1,18 +1,69 @@
-import axios from "axios";
+import axios, { type AxiosError, type InternalAxiosRequestConfig } from "axios";
 import { supabase } from "./supabase";
 
 export const api = axios.create({
   baseURL: import.meta.env.VITE_API_URL,
 });
 
-api.interceptors.request.use(async (config) => {
+// Refresh the access token if it expires within this many seconds. Long
+// uploads (videos, batches) can otherwise outlive a token captured at
+// request-start time.
+const REFRESH_LEEWAY_SECONDS = 120;
+
+let refreshInFlight: Promise<string | null> | null = null;
+
+async function getFreshToken(force = false): Promise<string | null> {
   const { data } = await supabase.auth.getSession();
-  const token = data.session?.access_token;
+  const session = data.session;
+  if (!session) return null;
+
+  const expiresAt = session.expires_at ?? 0; // unix seconds
+  const now = Math.floor(Date.now() / 1000);
+  const needsRefresh = force || expiresAt - now < REFRESH_LEEWAY_SECONDS;
+  if (!needsRefresh) return session.access_token;
+
+  // De-dupe concurrent refreshes (parallel uploads all hit the interceptor
+  // at once — one refresh, the rest reuse the result).
+  if (!refreshInFlight) {
+    refreshInFlight = supabase.auth
+      .refreshSession()
+      .then(({ data: refreshed }) => refreshed.session?.access_token ?? null)
+      .catch(() => session.access_token ?? null)
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
+api.interceptors.request.use(async (config) => {
+  const token = await getFreshToken();
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
+
+// One-shot retry on 401: refresh the token and replay the original request.
+// Guards against infinite loops by marking the config.
+api.interceptors.response.use(
+  (response) => response,
+  async (error: AxiosError) => {
+    const config = error.config as
+      | (InternalAxiosRequestConfig & { _retriedAfterRefresh?: boolean })
+      | undefined;
+    const status = error.response?.status;
+    if (status !== 401 || !config || config._retriedAfterRefresh) {
+      return Promise.reject(error);
+    }
+    const token = await getFreshToken(true);
+    if (!token) return Promise.reject(error);
+    config._retriedAfterRefresh = true;
+    config.headers = config.headers ?? {};
+    (config.headers as Record<string, string>).Authorization = `Bearer ${token}`;
+    return api.request(config);
+  },
+);
 
 export interface MatchedPhoto {
   photo_id: string;
