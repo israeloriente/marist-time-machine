@@ -403,13 +403,17 @@ onBeforeUnmount(() => {
     <transition name="fade">
       <section v-if="phase === 'running'" class="slideshow">
         <transition-group name="cross" tag="div" class="slide-stack">
-          <img
+          <div
             v-if="currentPhoto"
             :key="currentPhoto.id"
-            :src="currentPhoto.signed_url"
-            class="slide ken-burns"
-            alt=""
-          />
+            class="slide-frame ken-burns"
+          >
+            <div
+              class="slide-bg"
+              :style="{ backgroundImage: `url(${currentPhoto.signed_url})` }"
+            />
+            <img :src="currentPhoto.signed_url" class="slide-fg" alt="" />
+          </div>
         </transition-group>
 
         <div class="slide-overlay">
@@ -433,13 +437,25 @@ onBeforeUnmount(() => {
         @click="skipReveal"
       >
         <transition-group name="reveal-cross" tag="div" class="reveal-stack">
-          <img
+          <div
             v-if="currentRevealPhoto"
             :key="currentRevealPhoto.photo_id"
-            :src="currentRevealPhoto.thumb_signed_url || currentRevealPhoto.signed_url"
-            class="reveal-img ken-burns-slow"
-            alt=""
-          />
+            class="reveal-frame ken-burns-slow"
+          >
+            <div
+              class="reveal-bg"
+              :style="{
+                backgroundImage: `url(${
+                  currentRevealPhoto.thumb_signed_url || currentRevealPhoto.signed_url
+                })`,
+              }"
+            />
+            <img
+              :src="currentRevealPhoto.thumb_signed_url || currentRevealPhoto.signed_url"
+              class="reveal-fg"
+              alt=""
+            />
+          </div>
         </transition-group>
 
         <div class="reveal-overlay">
@@ -694,19 +710,32 @@ onBeforeUnmount(() => {
   background: #000;
 }
 .slide-stack { position: absolute; inset: 0; }
-.slide {
+.slide-frame {
+  position: absolute;
+  inset: 0;
+}
+/* Blurred copy fills the screen, foreground shows the whole image */
+.slide-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(40px) brightness(0.55);
+  transform: scale(1.15); /* hide blur edges */
+}
+.slide-fg {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 .ken-burns {
   animation: kenburns 6s ease-out forwards;
 }
 @keyframes kenburns {
   from { transform: scale(1.0); }
-  to   { transform: scale(1.15); }
+  to   { transform: scale(1.06); }
 }
 
 .slide-overlay {
@@ -765,19 +794,32 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 .reveal-stack { position: absolute; inset: 0; }
-.reveal-img {
+.reveal-frame {
+  position: absolute;
+  inset: 0;
+}
+.reveal-bg {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  filter: blur(40px) brightness(0.5);
+  transform: scale(1.15);
+}
+.reveal-fg {
   position: absolute;
   inset: 0;
   width: 100%;
   height: 100%;
-  object-fit: cover;
+  object-fit: contain;
 }
 .ken-burns-slow {
   animation: kenburns-slow 4.5s ease-out forwards;
 }
 @keyframes kenburns-slow {
+  /* Subtle zoom — too much makes contain crop ugly */
   from { transform: scale(1.0); }
-  to   { transform: scale(1.18); }
+  to   { transform: scale(1.05); }
 }
 
 .reveal-overlay {
