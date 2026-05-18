@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .. import db
-from ..deps import CurrentUser, User
+from ..deps import RequireAdmin, User
 from ..services import storage as storage_svc
 
 router = APIRouter(prefix="/faces", tags=["faces"])
@@ -52,7 +52,7 @@ async def list_unassigned(
     limit: int = 100,
     offset: int = 0,
     min_score: float = 0.0,
-    _user: User = CurrentUser,
+    _user: User = RequireAdmin,
 ) -> list[FaceOut]:
     """List faces that don't belong to any person yet.
 
@@ -95,7 +95,7 @@ async def list_unassigned(
 async def reassign_face(
     face_id: UUID,
     body: ReassignRequest,
-    _user: User = CurrentUser,
+    _user: User = RequireAdmin,
 ) -> dict:
     """Move a face to a different person (or unset by passing null)."""
     if body.person_id is not None:
@@ -121,7 +121,7 @@ class CreatePersonFromFaceRequest(BaseModel):
 async def promote_face_to_person(
     face_id: UUID,
     body: CreatePersonFromFaceRequest,
-    _user: User = CurrentUser,
+    _user: User = RequireAdmin,
 ) -> dict:
     """Create a new person seeded by this face (useful for unassigned faces).
     The face becomes the new person's thumbnail."""

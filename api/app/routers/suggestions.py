@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from .. import db
-from ..deps import CurrentUser, User
+from ..deps import CurrentUser, RequireAdmin, User
 
 router = APIRouter(prefix="/suggestions", tags=["suggestions"])
 
@@ -125,7 +125,7 @@ class GroupedSuggestion(BaseModel):
 
 
 @router.get("/pending", response_model=list[GroupedSuggestion])
-async def list_pending(_user: User = CurrentUser) -> list[GroupedSuggestion]:
+async def list_pending(_user: User = RequireAdmin) -> list[GroupedSuggestion]:
     """Admin view: pending suggestions grouped by (target, normalized_name)."""
     rows = await db.fetch(
         """
@@ -182,7 +182,7 @@ class TargetWithSuggestions(BaseModel):
 
 
 @router.get("/pending/by-target", response_model=list[TargetWithSuggestions])
-async def list_pending_by_target(_user: User = CurrentUser) -> list[TargetWithSuggestions]:
+async def list_pending_by_target(_user: User = RequireAdmin) -> list[TargetWithSuggestions]:
     """Like /pending but groups by (person_id, face_id) — multiple name votes
     for the same target are nested inside a single result entry.
 
@@ -314,7 +314,7 @@ async def list_pending_by_target(_user: User = CurrentUser) -> list[TargetWithSu
 
 
 @router.get("/by-person/{person_id}", response_model=list[GroupedSuggestion])
-async def list_for_person(person_id: UUID, _user: User = CurrentUser) -> list[GroupedSuggestion]:
+async def list_for_person(person_id: UUID, _user: User = RequireAdmin) -> list[GroupedSuggestion]:
     """Pending suggestions for one specific person."""
     rows = await db.fetch(
         """
@@ -365,7 +365,7 @@ class ApproveRequest(BaseModel):
 
 
 @router.post("/{suggestion_id}/approve")
-async def approve(suggestion_id: UUID, body: ApproveRequest | None = None, user: User = CurrentUser) -> dict:
+async def approve(suggestion_id: UUID, body: ApproveRequest | None = None, user: User = RequireAdmin) -> dict:
     """Approve a suggestion: write display_name on the person, or promote a face
     to a brand-new person with that name. All other pending suggestions for
     the same target with the same normalized_name are marked approved too."""
@@ -479,7 +479,7 @@ async def approve(suggestion_id: UUID, body: ApproveRequest | None = None, user:
 
 
 @router.post("/{suggestion_id}/reject")
-async def reject(suggestion_id: UUID, user: User = CurrentUser) -> dict:
+async def reject(suggestion_id: UUID, user: User = RequireAdmin) -> dict:
     """Reject all suggestions sharing the same target + normalized_name."""
     sugg = await db.fetchrow(
         "select * from public.name_suggestions where id = $1",

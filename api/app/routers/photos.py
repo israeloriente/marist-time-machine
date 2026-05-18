@@ -11,7 +11,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from pydantic import BaseModel
 
 from .. import db
-from ..deps import CurrentUser, User
+from ..deps import CurrentUser, RequireAdmin, User
 from ..services import media, storage, video
 from ..services.clustering import assign_face_to_person
 from ..services.ml_client import ml_client
@@ -247,7 +247,7 @@ async def list_for_moderation(
     status_filter: str = "pending",
     limit: int = 100,
     offset: int = 0,
-    _user: User = CurrentUser,
+    _user: User = RequireAdmin,
 ) -> list[PhotoModerationOut]:
     """Admin queue: list photos by moderation status (pending/approved/rejected)."""
     if status_filter not in {"pending", "approved", "rejected"}:
@@ -291,7 +291,7 @@ async def list_for_moderation(
 
 
 @router.get("/moderation/counts")
-async def moderation_counts(_user: User = CurrentUser) -> dict:
+async def moderation_counts(_user: User = RequireAdmin) -> dict:
     row = await db.fetchrow(
         """
         select
@@ -310,14 +310,14 @@ class ModerationDecision(BaseModel):
 
 @router.post("/{photo_id}/approve", response_model=PhotoModerationOut)
 async def approve_photo(
-    photo_id: UUID, body: ModerationDecision | None = None, user: User = CurrentUser
+    photo_id: UUID, body: ModerationDecision | None = None, user: User = RequireAdmin
 ) -> PhotoModerationOut:
     return await _set_moderation(photo_id, "approved", body, user)
 
 
 @router.post("/{photo_id}/reject", response_model=PhotoModerationOut)
 async def reject_photo(
-    photo_id: UUID, body: ModerationDecision | None = None, user: User = CurrentUser
+    photo_id: UUID, body: ModerationDecision | None = None, user: User = RequireAdmin
 ) -> PhotoModerationOut:
     return await _set_moderation(photo_id, "rejected", body, user)
 
@@ -343,7 +343,7 @@ class BulkResult(BaseModel):
 async def delete_photo_permanently(
     photo_id: UUID,
     require_rejected: bool = True,
-    _user: User = CurrentUser,
+    _user: User = RequireAdmin,
 ) -> DeletePhotoResult:
     """Permanently delete a photo: row, faces, and bucket objects.
 
@@ -454,12 +454,12 @@ async def _set_moderation(
 
 
 @router.post("/moderation/bulk-approve", response_model=BulkResult)
-async def bulk_approve(body: BulkRequest, user: User = CurrentUser) -> BulkResult:
+async def bulk_approve(body: BulkRequest, user: User = RequireAdmin) -> BulkResult:
     return await _bulk_moderate(body, "approved", user)
 
 
 @router.post("/moderation/bulk-reject", response_model=BulkResult)
-async def bulk_reject(body: BulkRequest, user: User = CurrentUser) -> BulkResult:
+async def bulk_reject(body: BulkRequest, user: User = RequireAdmin) -> BulkResult:
     return await _bulk_moderate(body, "rejected", user)
 
 
@@ -486,7 +486,7 @@ async def _bulk_moderate(body: BulkRequest, status_str: str, user: User) -> Bulk
 
 
 @router.post("/moderation/bulk-delete", response_model=BulkResult)
-async def bulk_delete(body: BulkRequest, _user: User = CurrentUser) -> BulkResult:
+async def bulk_delete(body: BulkRequest, _user: User = RequireAdmin) -> BulkResult:
     """Permanently delete a list of REJECTED photos (DB + Hetzner objects)."""
     if not body.photo_ids:
         return BulkResult(succeeded=[], failed=[])
@@ -538,7 +538,7 @@ async def bulk_delete(body: BulkRequest, _user: User = CurrentUser) -> BulkResul
 
 
 @router.get("", response_model=list[PhotoOut])
-async def list_photos(limit: int = 50, offset: int = 0, _user: User = CurrentUser) -> list[PhotoOut]:
+async def list_photos(limit: int = 50, offset: int = 0, _user: User = RequireAdmin) -> list[PhotoOut]:
     rows = await db.fetch(
         """
         select id, storage_path, storage_bucket, uploaded_at, metadata
@@ -562,7 +562,7 @@ async def list_photos(limit: int = 50, offset: int = 0, _user: User = CurrentUse
 
 
 @router.post("/regenerate-thumbnails")
-async def regenerate_thumbnails(_user: User = CurrentUser) -> dict:
+async def regenerate_thumbnails(_user: User = RequireAdmin) -> dict:
     """Generate missing thumbnails for legacy videos.
 
     Walks every photo with metadata.media_type=='video' that doesn't already
@@ -617,7 +617,7 @@ async def regenerate_thumbnails(_user: User = CurrentUser) -> dict:
 
 
 @router.post("/dedupe")
-async def dedupe(_user: User = CurrentUser) -> dict:
+async def dedupe(_user: User = RequireAdmin) -> dict:
     """Backfill content_hash for legacy photos and remove duplicates.
 
     For each photo without content_hash: download its bytes from storage,

@@ -9,7 +9,7 @@ from pydantic import BaseModel
 
 from .. import db
 from .. import scheduler
-from ..deps import CurrentUser, User
+from ..deps import CurrentUser, RequireAdmin, User
 from ..services.clustering import recluster_all, stats as clustering_stats
 
 router = APIRouter(prefix="/people", tags=["people"])
@@ -192,7 +192,7 @@ async def filters_available(_user: User = CurrentUser) -> dict:
 
 @router.patch("/{person_id}", response_model=PersonOut)
 async def update_person(
-    person_id: UUID, body: PersonUpdate, _user: User = CurrentUser
+    person_id: UUID, body: PersonUpdate, _user: User = RequireAdmin
 ) -> PersonOut:
     # Pydantic .model_fields_set tells us which keys the caller actually sent,
     # so passing display_name=null is distinct from omitting it.
@@ -238,7 +238,7 @@ async def update_person(
 
 
 @router.post("/merge")
-async def merge_people(body: MergeRequest, _user: User = CurrentUser) -> dict:
+async def merge_people(body: MergeRequest, _user: User = RequireAdmin) -> dict:
     """Reassign all faces from source to target, then delete source."""
     if body.source_id == body.target_id:
         raise HTTPException(status_code=400, detail="source and target must differ")
@@ -258,7 +258,7 @@ async def get_stats(_user: User = CurrentUser) -> dict:
 
 
 @router.post("/recluster")
-async def recluster(reset: bool = True, _user: User = CurrentUser) -> dict:
+async def recluster(reset: bool = True, _user: User = RequireAdmin) -> dict:
     """Re-run DBSCAN globally. If reset=true, wipes existing clusters first."""
     return await recluster_all(reset=reset)
 

@@ -1,5 +1,5 @@
 import { defineStore } from "pinia";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import type { Session } from "@supabase/supabase-js";
 import { supabase } from "@/services/supabase";
 
@@ -9,6 +9,15 @@ export const useAuthStore = defineStore(
     const session = ref<Session | null>(null);
     const loading = ref(false);
     const error = ref<string | null>(null);
+
+    // Read the role from app_metadata (server-controlled, NOT user-editable).
+    // user_metadata is editable by the user and must never be used for authz.
+    const isAdmin = computed(() => {
+      const meta = session.value?.user?.app_metadata as
+        | { role?: string }
+        | undefined;
+      return meta?.role === "admin";
+    });
 
     async function init() {
       const { data } = await supabase.auth.getSession();
@@ -51,7 +60,7 @@ export const useAuthStore = defineStore(
       session.value = null;
     }
 
-    return { session, loading, error, init, signInWithEmail, signUpWithEmail, signOut };
+    return { session, isAdmin, loading, error, init, signInWithEmail, signUpWithEmail, signOut };
   },
   { persist: false },
 );

@@ -59,7 +59,7 @@ export const router = createRouter({
       // Admin section with sidebar layout
       path: "/admin",
       component: () => import("@/layouts/AdminLayout.vue"),
-      meta: { requiresAuth: true },
+      meta: { requiresAuth: true, requiresAdmin: true },
       children: [
         {
           path: "",
@@ -116,6 +116,12 @@ router.beforeEach(async (to) => {
   if (!auth.session) await auth.init();
   if (to.meta.requiresAuth && !auth.session) {
     return { name: "login", query: { redirect: to.fullPath } };
+  }
+
+  // Admin gate: routes flagged requiresAdmin need app_metadata.role === 'admin'.
+  // This is a UX guard only — the backend rejects non-admins independently.
+  if (to.meta.requiresAdmin && !auth.isAdmin) {
+    return { name: "home" };
   }
 
   // Profile gate: authenticated users without a saved profile go to /onboarding.

@@ -15,7 +15,7 @@ from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .. import db
-from ..deps import CurrentUser, User
+from ..deps import CurrentUser, RequireAdmin, User
 from ..services import youtube
 
 router = APIRouter(prefix="/songs", tags=["songs"])
@@ -290,7 +290,7 @@ async def list_for_moderation(
     status_filter: str = "pending",
     limit: int = 100,
     offset: int = 0,
-    _user: User = CurrentUser,
+    _user: User = RequireAdmin,
 ) -> list[SongModerationOut]:
     """Admin queue: list songs by moderation status."""
     if status_filter not in {"pending", "approved", "rejected"}:
@@ -310,7 +310,7 @@ async def list_for_moderation(
 
 
 @router.get("/moderation/counts")
-async def moderation_counts(_user: User = CurrentUser) -> dict:
+async def moderation_counts(_user: User = RequireAdmin) -> dict:
     row = await db.fetchrow(
         """
         select
@@ -329,14 +329,14 @@ class ModerationDecision(BaseModel):
 
 @router.post("/{song_id}/approve", response_model=SongModerationOut)
 async def approve_song(
-    song_id: UUID, body: ModerationDecision | None = None, user: User = CurrentUser
+    song_id: UUID, body: ModerationDecision | None = None, user: User = RequireAdmin
 ) -> SongModerationOut:
     return await _set_moderation(song_id, "approved", body, user)
 
 
 @router.post("/{song_id}/reject", response_model=SongModerationOut)
 async def reject_song(
-    song_id: UUID, body: ModerationDecision | None = None, user: User = CurrentUser
+    song_id: UUID, body: ModerationDecision | None = None, user: User = RequireAdmin
 ) -> SongModerationOut:
     return await _set_moderation(song_id, "rejected", body, user)
 
@@ -378,12 +378,12 @@ class BulkResult(BaseModel):
 
 
 @router.post("/moderation/bulk-approve", response_model=BulkResult)
-async def bulk_approve(body: BulkRequest, user: User = CurrentUser) -> BulkResult:
+async def bulk_approve(body: BulkRequest, user: User = RequireAdmin) -> BulkResult:
     return await _bulk_moderate(body, "approved", user)
 
 
 @router.post("/moderation/bulk-reject", response_model=BulkResult)
-async def bulk_reject(body: BulkRequest, user: User = CurrentUser) -> BulkResult:
+async def bulk_reject(body: BulkRequest, user: User = RequireAdmin) -> BulkResult:
     return await _bulk_moderate(body, "rejected", user)
 
 
@@ -430,7 +430,7 @@ async def delete_song(song_id: UUID, user: User = CurrentUser):
 
 
 @router.post("/moderation/bulk-delete", response_model=BulkResult)
-async def bulk_delete(body: BulkRequest, _user: User = CurrentUser) -> BulkResult:
+async def bulk_delete(body: BulkRequest, _user: User = RequireAdmin) -> BulkResult:
     if not body.song_ids:
         return BulkResult(succeeded=[], failed=[])
     await db.execute(
