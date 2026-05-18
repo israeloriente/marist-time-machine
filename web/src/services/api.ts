@@ -253,6 +253,41 @@ export const meApi = {
     (await api.put<UserProfile>("/me/profile", { graduation_year, class_letter })).data,
 };
 
+// ---------- Songs (trilha sonora) ----------
+
+export interface Song {
+  id: string;
+  user_id: string;
+  youtube_id: string;
+  title: string | null;
+  channel: string | null;
+  caption: string | null;
+  thumbnail_url: string | null;
+  watch_url: string;
+  created_at: string;
+  user_email: string | null;
+  user_graduation_year: number | null;
+  user_class_letter: string | null;
+}
+
+export const songsApi = {
+  list: async (filters: { year?: number; class?: string; user_id?: string } = {}): Promise<Song[]> => {
+    const params: Record<string, string | number> = {};
+    if (filters.year !== undefined) params.year = filters.year;
+    if (filters.class) params.class = filters.class;
+    if (filters.user_id) params.user_id = filters.user_id;
+    return (await api.get<Song[]>("/songs", { params })).data;
+  },
+  mine: async (): Promise<Song[]> => (await api.get<Song[]>("/songs/mine")).data,
+  create: async (url: string, caption?: string): Promise<Song> =>
+    (await api.post<Song>("/songs", { url, caption: caption ?? null })).data,
+  update: async (id: string, caption: string | null): Promise<Song> =>
+    (await api.patch<Song>(`/songs/${id}`, { caption })).data,
+  remove: async (id: string): Promise<void> => {
+    await api.delete(`/songs/${id}`);
+  },
+};
+
 export const suggestionsApi = {
   create: async (
     target: { person_id?: string; face_id?: string },

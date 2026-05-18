@@ -44,6 +44,12 @@ export const router = createRouter({
       meta: { requiresAuth: true },
     },
     {
+      path: "/musicas",
+      name: "songs",
+      component: () => import("@/views/SongsView.vue"),
+      meta: { requiresAuth: true },
+    },
+    {
       // Admin section with sidebar layout
       path: "/admin",
       component: () => import("@/layouts/AdminLayout.vue"),
