@@ -4,8 +4,10 @@ import SongCard from "@/components/SongCard.vue";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import { peopleApi, songsApi, type AvailableFilters, type Song } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
+import { useNotifyStore } from "@/stores/notify";
 
 const auth = useAuthStore();
+const notify = useNotifyStore();
 
 const songs = ref<Song[]>([]);
 const loading = ref(true);
@@ -114,7 +116,7 @@ async function confirmRemove() {
     songs.value = songs.value.filter((s) => s.id !== target.id);
     removeTarget.value = null;
   } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+    notify.error("Erro ao remover música", e);
   } finally {
     removing.value = false;
   }

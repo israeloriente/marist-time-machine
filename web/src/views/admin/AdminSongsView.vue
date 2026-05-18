@@ -6,6 +6,9 @@ import {
   type ModerationCounts,
   type Song,
 } from "@/services/api";
+import { useNotifyStore } from "@/stores/notify";
+
+const notify = useNotifyStore();
 
 type Status = "pending" | "approved" | "rejected";
 type ConfirmAction =
@@ -113,8 +116,8 @@ async function runConfirm() {
     await loadCounts();
     confirmOpen.value = false;
     confirmAction.value = null;
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao processar", e);
   } finally {
     busy.value = false;
   }

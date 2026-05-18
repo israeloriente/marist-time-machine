@@ -7,6 +7,9 @@ import {
   type NameVote,
   type TargetWithSuggestions,
 } from "@/services/api";
+import { useNotifyStore } from "@/stores/notify";
+
+const notify = useNotifyStore();
 
 const items = ref<TargetWithSuggestions[]>([]);
 const loading = ref(true);
@@ -21,30 +24,41 @@ async function load() {
 }
 
 async function approveVote(target: TargetWithSuggestions, vote: NameVote) {
-  const final = prompt("Aprovar com qual nome?", vote.suggested_name)?.trim();
-  if (final === undefined) return;
+  const final = await notify.prompt({
+    title: "Aprovar sugestão",
+    message: "Aprovar com qual nome?",
+    defaultValue: vote.suggested_name,
+    placeholder: "Nome completo",
+    confirmLabel: "Aprovar",
+    required: true,
+  });
+  if (final === null) return;
   try {
     await suggestionsApi.approve(vote.suggestion_id, {
       final_name: final || undefined,
-      // For now pass through whatever the contributor suggested (admin can
-      // edit in /admin/pessoas/:id afterward).
       final_graduation_year: vote.suggested_graduation_year ?? null,
       final_class_letter: vote.suggested_class_letter ?? null,
     });
     await load();
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao aprovar sugestão", e);
   }
+  void target;
 }
 
 async function rejectVote(target: TargetWithSuggestions, vote: NameVote) {
-  if (!confirm(`Rejeitar "${vote.suggested_name}"?`)) return;
+  const ok = await notify.confirm({
+    title: "Rejeitar sugestão?",
+    message: `"${vote.suggested_name}"`,
+    confirmLabel: "Rejeitar",
+  });
+  if (!ok) return;
   try {
     await suggestionsApi.reject(vote.suggestion_id);
     target.names = target.names.filter((v) => v.suggestion_id !== vote.suggestion_id);
     if (!target.names.length) items.value = items.value.filter((t) => t !== target);
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao rejeitar sugestão", e);
   }
 }
 

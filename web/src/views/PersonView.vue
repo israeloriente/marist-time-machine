@@ -13,6 +13,9 @@ import {
   type PersonPhoto,
   type SuggestionGroup,
 } from "@/services/api";
+import { useNotifyStore } from "@/stores/notify";
+
+const notify = useNotifyStore();
 
 const route = useRoute();
 const router = useRouter();
@@ -67,8 +70,8 @@ async function saveName() {
   try {
     const updated = await peopleApi.rename(personId, renameValue.value.trim() || null);
     person.value.display_name = updated.display_name;
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao salvar nome", e);
   } finally {
     savingName.value = false;
   }
@@ -85,20 +88,26 @@ async function saveGraduation() {
     );
     person.value.graduation_year = updated.graduation_year;
     person.value.class_letter = updated.class_letter;
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao salvar formatura", e);
   } finally {
     savingGrad.value = false;
   }
 }
 
 async function detachFace(face: Face) {
-  if (!confirm("Remover esse rosto desta pessoa? Ele voltará para 'não atribuídos'.")) return;
+  const ok = await notify.confirm({
+    title: "Remover rosto desta pessoa?",
+    message: "Ele voltará para 'não atribuídos'.",
+    confirmLabel: "Remover",
+    variant: "default",
+  });
+  if (!ok) return;
   try {
     await facesApi.reassign(face.id, null);
     faces.value = faces.value.filter((f) => f.id !== face.id);
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao remover rosto", e);
   }
 }
 
@@ -110,55 +119,73 @@ function openMergePicker() {
 
 async function onMergePick(target: Person) {
   const targetName = target.display_name || `Pessoa ${target.id.slice(0, 8)}`;
-  if (!confirm(`Mesclar TODOS os rostos desta pessoa em "${targetName}"?\n\nEsta pessoa será apagada.`)) return;
+  const ok = await notify.confirm({
+    title: "Mesclar pessoas?",
+    message: `Todos os rostos desta pessoa vão pra "${targetName}". Esta pessoa será apagada.`,
+    confirmLabel: "Mesclar",
+    variant: "danger",
+  });
+  if (!ok) return;
   try {
     await peopleApi.merge(personId, target.id);
     showMergePicker.value = false;
     router.push({ name: "person", params: { id: target.id } });
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao mesclar", e);
   }
 }
 
 async function approveSuggestion(g: SuggestionGroup) {
-  // Use the first (newest) suggestion id; admin may edit the name.
-  const final = prompt("Aprovar com qual nome?", g.suggested_name)?.trim();
-  if (final === undefined) return;
+  const final = await notify.prompt({
+    title: "Aprovar sugestão",
+    message: "Aprovar com qual nome?",
+    defaultValue: g.suggested_name,
+    placeholder: "Nome completo",
+    confirmLabel: "Aprovar",
+    required: true,
+  });
+  if (final === null) return;
   try {
     await suggestionsApi.approve(g.suggestion_ids[0], {
       final_name: final || undefined,
       final_graduation_year: g.suggested_graduation_year ?? null,
       final_class_letter: g.suggested_class_letter ?? null,
     });
-    // Refresh
     await load();
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao aprovar sugestão", e);
   }
 }
 
 async function rejectSuggestion(g: SuggestionGroup) {
-  if (!confirm(`Rejeitar "${g.suggested_name}" (${g.vote_count} ${g.vote_count === 1 ? "voto" : "votos"})?`)) return;
+  const ok = await notify.confirm({
+    title: "Rejeitar sugestão?",
+    message: `"${g.suggested_name}" (${g.vote_count} ${g.vote_count === 1 ? "voto" : "votos"})`,
+    confirmLabel: "Rejeitar",
+  });
+  if (!ok) return;
   try {
     await suggestionsApi.reject(g.suggestion_ids[0]);
     suggestions.value = suggestions.value.filter((s) => s !== g);
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao rejeitar sugestão", e);
   }
 }
 
 async function rejectPerson() {
-  if (
-    !confirm(
-      "Rejeitar esta pessoa? Ela some das buscas e do /contribute, mas pode ser reativada depois pela aba 'Rejeitadas'.",
-    )
-  )
-    return;
+  const ok = await notify.confirm({
+    title: "Rejeitar esta pessoa?",
+    message:
+      "Ela some das buscas e do /contribute, mas pode ser reativada depois pela aba 'Rejeitadas'.",
+    confirmLabel: "Rejeitar",
+    variant: "danger",
+  });
+  if (!ok) return;
   try {
     const updated = await peopleApi.setStatus(personId, "rejected");
     if (person.value) person.value.status = updated.status;
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao rejeitar pessoa", e);
   }
 }
 
@@ -166,8 +193,9 @@ async function reactivatePerson() {
   try {
     const updated = await peopleApi.setStatus(personId, "active");
     if (person.value) person.value.status = updated.status;
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+    notify.success("Pessoa reativada");
+  } catch (e) {
+    notify.error("Erro ao reativar pessoa", e);
   }
 }
 

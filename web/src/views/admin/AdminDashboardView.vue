@@ -12,6 +12,9 @@ import {
   type ModerationCounts,
   type ReclusterStatus,
 } from "@/services/api";
+import { useNotifyStore } from "@/stores/notify";
+
+const notify = useNotifyStore();
 
 const stats = ref<ClusterStats | null>(null);
 const status = ref<ReclusterStatus | null>(null);
@@ -48,50 +51,63 @@ const fmt = (iso: string | null | undefined) => {
 };
 
 async function runRecluster() {
-  if (
-    !confirm(
-      "Reagrupar agora?\n\nPessoas com nome serão preservadas (junto com seus rostos).\n" +
-        "Pessoas sem nome serão refeitas a partir dos rostos não atribuídos.",
-    )
-  ) return;
+  const ok = await notify.confirm({
+    title: "Reagrupar agora?",
+    message:
+      "Pessoas com nome serão preservadas (junto com seus rostos). Pessoas sem nome serão refeitas a partir dos rostos não atribuídos.",
+    confirmLabel: "Reagrupar",
+  });
+  if (!ok) return;
   reclusterBusy.value = true;
   try {
     const r = await peopleApi.recluster(true);
-    alert(`Concluído.\n${r.faces_assigned} rostos atribuídos. ${r.people_created} pessoas criadas.`);
+    notify.success(
+      `Concluído. ${r.faces_assigned} rostos atribuídos · ${r.people_created} pessoas criadas`,
+    );
     await load();
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao reagrupar", e);
   } finally {
     reclusterBusy.value = false;
   }
 }
 
 async function runRegenThumbs() {
-  if (!confirm("Gerar thumbnails dos vídeos que ainda não têm? Pode levar alguns minutos.")) return;
+  const ok = await notify.confirm({
+    title: "Gerar thumbnails dos vídeos?",
+    message: "Pode levar alguns minutos.",
+    confirmLabel: "Gerar",
+  });
+  if (!ok) return;
   thumbsBusy.value = true;
   try {
     const r = await regenerateVideoThumbnails();
-    alert(
-      `Concluído.\n${r.videos_visited} vídeos sem thumb.\n${r.thumbnails_generated} gerados.\n${r.errors} erros.`,
+    notify.success(
+      `Concluído. ${r.thumbnails_generated} thumbs geradas · ${r.errors} erros`,
     );
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao gerar thumbnails", e);
   } finally {
     thumbsBusy.value = false;
   }
 }
 
 async function runDedupe() {
-  if (!confirm("Procurar e remover fotos duplicadas? Pode levar alguns minutos.")) return;
+  const ok = await notify.confirm({
+    title: "Procurar e remover duplicadas?",
+    message: "Pode levar alguns minutos.",
+    confirmLabel: "Remover duplicadas",
+  });
+  if (!ok) return;
   dedupeBusy.value = true;
   try {
     const r = await dedupePhotos();
-    alert(
-      `Concluído.\n${r.photos_visited} fotos vistas.\n${r.duplicates_removed} duplicatas removidas.\n${r.hashed} novas com hash.\n${r.errors} erros.`,
+    notify.success(
+      `Concluído. ${r.duplicates_removed} duplicatas · ${r.hashed} novas com hash · ${r.errors} erros`,
     );
     await load();
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao deduplicar", e);
   } finally {
     dedupeBusy.value = false;
   }

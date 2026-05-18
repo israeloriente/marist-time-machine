@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, watch } from "vue";
 import { RouterLink, RouterView, useRoute } from "vue-router";
+import NotifyHost from "@/components/NotifyHost.vue";
 import { useAuthStore } from "@/stores/auth";
 import { useProfileStore } from "@/stores/profile";
 
@@ -29,6 +30,10 @@ async function signOut() {
 </script>
 
 <template>
+  <!-- Global notification host: toasts + confirm/prompt overlays.
+       Mounted once outside any route view so it sits above everything. -->
+  <NotifyHost />
+
   <!-- Admin / kiosk routes render full-screen — no public topbar. -->
   <RouterView v-if="hideTopbar" />
 

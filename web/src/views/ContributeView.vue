@@ -11,10 +11,12 @@ import {
   type Person,
 } from "@/services/api";
 import { useProfileStore } from "@/stores/profile";
+import { useNotifyStore } from "@/stores/notify";
 
 type Mode = "people" | "faces";
 const mode = ref<Mode>("people");
 const profileStore = useProfileStore();
+const notify = useNotifyStore();
 
 const anonymousPeople = ref<Array<Person & { thumb?: Face | null }>>([]);
 const orphanFaces = ref<Face[]>([]);
@@ -145,9 +147,9 @@ async function onSuggestSubmit(payload: {
     dialogOpen.value = false;
   } catch (e: any) {
     if (e.response?.status === 409) {
-      alert("Você já sugeriu esse nome.");
+      notify.toast("Você já sugeriu esse nome.", "warning");
     } else {
-      alert("Erro: " + (e.response?.data?.detail ?? e.message));
+      notify.error("Erro ao enviar sugestão", e);
     }
   }
 }

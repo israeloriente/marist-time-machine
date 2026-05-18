@@ -3,6 +3,9 @@ import { onMounted, ref } from "vue";
 import FaceThumb from "@/components/FaceThumb.vue";
 import PersonPickerDialog from "@/components/PersonPickerDialog.vue";
 import { facesApi, type Face, type Person } from "@/services/api";
+import { useNotifyStore } from "@/stores/notify";
+
+const notify = useNotifyStore();
 
 const unassigned = ref<Face[]>([]);
 const loading = ref(false);
@@ -30,12 +33,18 @@ async function load(reset = false) {
 }
 
 async function promoteToPerson(face: Face) {
-  const name = prompt("Nome da nova pessoa (opcional):") ?? "";
+  const name = await notify.prompt({
+    title: "Promover a pessoa",
+    message: "Dê um nome (opcional) ou deixe em branco pra criar como anônima.",
+    placeholder: "Nome (opcional)",
+    confirmLabel: "Criar pessoa",
+  });
+  if (name === null) return;
   try {
     await facesApi.promote(face.id, name || undefined);
     unassigned.value = unassigned.value.filter((f) => f.id !== face.id);
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao promover rosto", e);
   }
 }
 
@@ -52,8 +61,8 @@ async function onAssignPick(person: Person) {
     unassigned.value = unassigned.value.filter((f) => f.id !== face.id);
     showAssignPicker.value = false;
     faceBeingAssigned.value = null;
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } catch (e) {
+    notify.error("Erro ao atribuir rosto", e);
   }
 }
 

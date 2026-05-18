@@ -3,6 +3,9 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import FaceThumb from "@/components/FaceThumb.vue";
 import { peopleApi, type AvailableFilters, type Face, type Person } from "@/services/api";
+import { useNotifyStore } from "@/stores/notify";
+
+const notify = useNotifyStore();
 
 const router = useRouter();
 
@@ -115,18 +118,17 @@ async function onDrop(target: Person, e: DragEvent) {
 
   const sourceLabel = source.display_name || `Pessoa ${source.id.slice(0, 8)}`;
   const targetLabel = target.display_name || `Pessoa ${target.id.slice(0, 8)}`;
-  if (
-    !confirm(
-      `Mesclar "${sourceLabel}" em "${targetLabel}"?\n\n${source.face_count} rostos serão movidos. ` +
-        `"${sourceLabel}" será apagada.`,
-    )
-  )
-    return;
+  const ok = await notify.confirm({
+    title: "Mesclar pessoas?",
+    message: `"${sourceLabel}" será mesclada em "${targetLabel}". ${source.face_count} rostos serão movidos e "${sourceLabel}" será apagada.`,
+    confirmLabel: "Mesclar",
+    variant: "danger",
+  });
+  if (!ok) return;
 
   merging.value = true;
   try {
     await peopleApi.merge(sourceId, target.id);
-    // Optimistic: remove source from list and bump target's face count
     people.value = people.value
       .map((p) =>
         p.id === target.id
@@ -134,9 +136,8 @@ async function onDrop(target: Person, e: DragEvent) {
           : p,
       )
       .filter((p) => p.id !== sourceId);
-  } catch (err: any) {
-    alert("Erro ao mesclar: " + (err.response?.data?.detail ?? err.message ?? String(err)));
-    // Refresh from server to recover canonical state
+  } catch (err) {
+    notify.error("Erro ao mesclar", err);
     await load();
   } finally {
     merging.value = false;
@@ -155,10 +156,10 @@ async function reactivatePerson(p: Person, e: MouseEvent) {
   e.stopPropagation();
   try {
     await peopleApi.setStatus(p.id, "active");
-    // Optimistic: drop from the rejected list immediately
     people.value = people.value.filter((x) => x.id !== p.id);
-  } catch (err: any) {
-    alert("Erro: " + (err.response?.data?.detail ?? err.message));
+    notify.success("Pessoa reativada");
+  } catch (err) {
+    notify.error("Erro ao reativar pessoa", err);
   }
 }
 
