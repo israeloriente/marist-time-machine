@@ -166,11 +166,32 @@ export interface SuggestionGroup {
   suggestion_ids: string[];
 }
 
+export interface NameVote {
+  suggestion_id: string;
+  suggested_name: string;
+  normalized_name: string;
+  vote_count: number;
+  first_at: string;
+  last_at: string;
+}
+
+export interface TargetWithSuggestions {
+  person_id: string | null;
+  face_id: string | null;
+  face_count: number;
+  detection_score: number;
+  thumb_signed_url: string | null;
+  thumb_bbox: number[] | null;
+  names: NameVote[];
+}
+
 export const suggestionsApi = {
   create: async (target: { person_id?: string; face_id?: string }, suggested_name: string) =>
     (await api.post("/suggestions", { ...target, suggested_name })).data,
   pending: async (): Promise<SuggestionGroup[]> =>
     (await api.get<SuggestionGroup[]>("/suggestions/pending")).data,
+  pendingByTarget: async (): Promise<TargetWithSuggestions[]> =>
+    (await api.get<TargetWithSuggestions[]>("/suggestions/pending/by-target")).data,
   byPerson: async (person_id: string): Promise<SuggestionGroup[]> =>
     (await api.get<SuggestionGroup[]>(`/suggestions/by-person/${person_id}`)).data,
   approve: async (suggestion_id: string, final_name?: string) => {

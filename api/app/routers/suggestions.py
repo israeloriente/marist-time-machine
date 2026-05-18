@@ -146,6 +146,148 @@ async def list_pending(_user: User = CurrentUser) -> list[GroupedSuggestion]:
     ]
 
 
+class NameVote(BaseModel):
+    suggestion_id: UUID  # representative id (use this to approve/reject the group)
+    suggested_name: str
+    normalized_name: str
+    vote_count: int
+    first_at: str
+    last_at: str
+
+
+class TargetWithSuggestions(BaseModel):
+    """One target (person or orphan face) with all its proposed names inside."""
+    person_id: UUID | None
+    face_id: UUID | None
+    face_count: int = 0          # photos this person appears in, if person
+    detection_score: float = 0.0 # face score, if orphan face
+    thumb_signed_url: str | None = None
+    thumb_bbox: list[float] | None = None
+    names: list[NameVote]
+
+
+@router.get("/pending/by-target", response_model=list[TargetWithSuggestions])
+async def list_pending_by_target(_user: User = CurrentUser) -> list[TargetWithSuggestions]:
+    """Like /pending but groups by (person_id, face_id) — multiple name votes
+    for the same target are nested inside a single result entry.
+
+    Also pre-resolves a face thumbnail (signed URL + bbox) so the UI doesn't
+    need a second round-trip per target.
+    """
+    from ..routers.faces import _coerce_bbox
+    from ..services import storage as storage_svc
+
+    rows = await db.fetch(
+        """
+        with grouped as (
+          select
+            person_id,
+            face_id,
+            (array_agg(suggested_name order by created_at desc))[1] as suggested_name,
+            normalized_name,
+            count(*) as vote_count,
+            min(created_at) as first_at,
+            max(created_at) as last_at,
+            (array_agg(id order by created_at desc))[1] as representative_id
+          from public.name_suggestions
+          where status = 'pending'
+          group by person_id, face_id, normalized_name
+        )
+        select * from grouped
+        order by vote_count desc, last_at desc
+        """,
+    )
+
+    # Bucket name votes by (person_id, face_id)
+    by_target: dict[tuple[str | None, str | None], list[NameVote]] = {}
+    target_order: list[tuple[str | None, str | None]] = []
+    for r in rows:
+        key = (str(r["person_id"]) if r["person_id"] else None,
+               str(r["face_id"])   if r["face_id"]   else None)
+        if key not in by_target:
+            by_target[key] = []
+            target_order.append(key)
+        by_target[key].append(
+            NameVote(
+                suggestion_id=r["representative_id"],
+                suggested_name=r["suggested_name"],
+                normalized_name=r["normalized_name"],
+                vote_count=r["vote_count"],
+                first_at=r["first_at"].isoformat(),
+                last_at=r["last_at"].isoformat(),
+            )
+        )
+
+    # Resolve thumbs in one pass
+    person_ids = [k[0] for k in target_order if k[0]]
+    face_ids   = [k[1] for k in target_order if k[1]]
+
+    # For each person, get a representative face (highest detection_score).
+    person_thumbs: dict[str, dict] = {}
+    if person_ids:
+        prows = await db.fetch(
+            """
+            select distinct on (f.person_id)
+              f.person_id, f.bbox, p.storage_bucket, p.storage_path
+            from public.faces f
+            join public.photos p on p.id = f.photo_id
+            where f.person_id = any($1::uuid[])
+            order by f.person_id, f.detection_score desc nulls last
+            """,
+            person_ids,
+        )
+        for pr in prows:
+            person_thumbs[str(pr["person_id"])] = {
+                "bbox": _coerce_bbox(pr["bbox"]),
+                "url": storage_svc.signed_url(pr["storage_bucket"], pr["storage_path"]),
+            }
+
+    # For each orphan face, get its bbox + photo
+    face_thumbs: dict[str, dict] = {}
+    face_scores: dict[str, float] = {}
+    if face_ids:
+        frows = await db.fetch(
+            """
+            select f.id, f.bbox, f.detection_score,
+                   p.storage_bucket, p.storage_path
+            from public.faces f
+            join public.photos p on p.id = f.photo_id
+            where f.id = any($1::uuid[])
+            """,
+            face_ids,
+        )
+        for fr in frows:
+            face_thumbs[str(fr["id"])] = {
+                "bbox": _coerce_bbox(fr["bbox"]),
+                "url": storage_svc.signed_url(fr["storage_bucket"], fr["storage_path"]),
+            }
+            face_scores[str(fr["id"])] = float(fr["detection_score"] or 0)
+
+    # Person face counts (optional — small cost extra)
+    person_face_counts: dict[str, int] = {}
+    if person_ids:
+        crows = await db.fetch(
+            "select person_id, count(*) as n from public.faces where person_id = any($1::uuid[]) group by person_id",
+            person_ids,
+        )
+        for cr in crows:
+            person_face_counts[str(cr["person_id"])] = int(cr["n"])
+
+    out: list[TargetWithSuggestions] = []
+    for (pid, fid) in target_order:
+        thumb = person_thumbs.get(pid) if pid else face_thumbs.get(fid)
+        out.append(TargetWithSuggestions(
+            person_id=UUID(pid) if pid else None,
+            face_id=UUID(fid) if fid else None,
+            face_count=person_face_counts.get(pid, 0) if pid else 0,
+            detection_score=face_scores.get(fid, 0.0) if fid else 0.0,
+            thumb_signed_url=thumb["url"] if thumb else None,
+            thumb_bbox=thumb["bbox"] if thumb else None,
+            names=by_target[(pid, fid)],
+        ))
+    return out
+
+
 @router.get("/by-person/{person_id}", response_model=list[GroupedSuggestion])
 async def list_for_person(person_id: UUID, _user: User = CurrentUser) -> list[GroupedSuggestion]:
     """Pending suggestions for one specific person."""

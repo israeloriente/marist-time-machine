@@ -9,9 +9,10 @@ import {
   suggestionsApi,
   type ClusterStats,
   type Face,
+  type NameVote,
   type Person,
   type ReclusterStatus,
-  type SuggestionGroup,
+  type TargetWithSuggestions,
 } from "@/services/api";
 
 type Tab = "people" | "unassigned" | "suggestions" | "status";
@@ -30,11 +31,8 @@ const unassignedLoading = ref(false);
 const unassignedOffset = ref(0);
 const unassignedMore = ref(true);
 
-const allSuggestions = ref<SuggestionGroup[]>([]);
+const allSuggestions = ref<TargetWithSuggestions[]>([]);
 const suggestionsLoading = ref(false);
-// Indexed lookup for thumbnails on suggestions
-const personById = ref<Record<string, Person>>({});
-const faceById = ref<Record<string, Face>>({});
 
 // Cache: person_id -> first face (to render thumb)
 const thumbCache = ref<Record<string, Face | null>>({});
@@ -176,52 +174,31 @@ onMounted(async () => {
 async function loadSuggestions() {
   suggestionsLoading.value = true;
   try {
-    allSuggestions.value = await suggestionsApi.pending();
-    // Pre-fetch person/face thumbs we'll need
-    const personIds = new Set<string>();
-    const faceIds = new Set<string>();
-    for (const g of allSuggestions.value) {
-      if (g.person_id) personIds.add(g.person_id);
-      if (g.face_id) faceIds.add(g.face_id);
-    }
-    // People we already have from loadPeople; just index them
-    for (const p of people.value) personById.value[p.id] = p;
-    // For each person, grab a face (cache via thumbCache)
-    await Promise.all(
-      [...personIds].map(async (pid) => {
-        if (thumbCache.value[pid]) return;
-        try {
-          const fs = await peopleApi.faces(pid);
-          thumbCache.value[pid] = fs[0] ?? null;
-        } catch {
-          thumbCache.value[pid] = null;
-        }
-      }),
-    );
-    // For orphan faces, fetch them via unassigned listing (we already loaded some).
-    // If a face isn't in the unassigned cache, skip thumb (still show name + count).
-    for (const f of unassigned.value) faceById.value[f.id] = f;
+    allSuggestions.value = await suggestionsApi.pendingByTarget();
   } finally {
     suggestionsLoading.value = false;
   }
 }
 
-async function approveSuggestion(g: SuggestionGroup) {
-  const final = prompt("Aprovar com qual nome?", g.suggested_name)?.trim();
+async function approveVote(target: TargetWithSuggestions, vote: NameVote) {
+  const final = prompt("Aprovar com qual nome?", vote.suggested_name)?.trim();
   if (final === undefined) return;
   try {
-    await suggestionsApi.approve(g.suggestion_ids[0], final || undefined);
+    await suggestionsApi.approve(vote.suggestion_id, final || undefined);
     await Promise.all([loadStats(), loadPeople(), loadSuggestions()]);
   } catch (e: any) {
     alert("Erro: " + (e.response?.data?.detail ?? e.message));
   }
 }
 
-async function rejectSuggestion(g: SuggestionGroup) {
-  if (!confirm(`Rejeitar "${g.suggested_name}"?`)) return;
+async function rejectVote(target: TargetWithSuggestions, vote: NameVote) {
+  if (!confirm(`Rejeitar "${vote.suggested_name}"?`)) return;
   try {
-    await suggestionsApi.reject(g.suggestion_ids[0]);
-    allSuggestions.value = allSuggestions.value.filter((s) => s !== g);
+    await suggestionsApi.reject(vote.suggestion_id);
+    target.names = target.names.filter((v) => v.suggestion_id !== vote.suggestion_id);
+    if (target.names.length === 0) {
+      allSuggestions.value = allSuggestions.value.filter((t) => t !== target);
+    }
   } catch (e: any) {
     alert("Erro: " + (e.response?.data?.detail ?? e.message));
   }
@@ -333,44 +310,49 @@ function switchTab(t: Tab) {
       <p v-else-if="!allSuggestions.length" class="muted small">
         Nenhuma sugestão pendente.
       </p>
-      <ul v-else class="sugg-list">
-        <li v-for="g in allSuggestions" :key="g.suggestion_ids[0]" class="sugg-row">
-          <div class="sugg-target">
-            <template v-if="g.person_id && thumbCache[g.person_id]">
-              <FaceThumb
-                :src="thumbCache[g.person_id]!.signed_url"
-                :bbox="thumbCache[g.person_id]!.bbox"
-                :size="56"
-                :padding="0.3"
-              />
-            </template>
-            <template v-else-if="g.face_id && faceById[g.face_id]">
-              <FaceThumb
-                :src="faceById[g.face_id].signed_url"
-                :bbox="faceById[g.face_id].bbox"
-                :size="56"
-                :padding="0.3"
-              />
-            </template>
-            <div v-else class="thumb-placeholder" style="width:56px;height:56px">?</div>
+      <ul v-else class="sugg-cards">
+        <li v-for="t in allSuggestions" :key="(t.person_id ?? t.face_id) as string" class="sugg-card">
+          <div class="sugg-card-head">
+            <FaceThumb
+              v-if="t.thumb_signed_url && t.thumb_bbox"
+              :src="t.thumb_signed_url"
+              :bbox="t.thumb_bbox"
+              :size="72"
+              :padding="0.3"
+            />
+            <div v-else class="thumb-placeholder" style="width:72px;height:72px">?</div>
 
-            <div class="sugg-meta">
-              <strong>{{ g.suggested_name }}</strong>
+            <div class="sugg-card-info">
+              <strong>
+                <template v-if="t.person_id">
+                  {{ t.face_count }} {{ t.face_count === 1 ? "foto" : "fotos" }}
+                </template>
+                <template v-else>Rosto avulso</template>
+              </strong>
               <span class="muted small">
-                {{ g.vote_count }} {{ g.vote_count === 1 ? "voto" : "votos" }}
-                · {{ g.person_id ? "pessoa" : "rosto avulso" }}
+                {{ t.names.length }} {{ t.names.length === 1 ? "nome sugerido" : "nomes sugeridos" }}
+                <template v-if="!t.person_id"> · {{ (t.detection_score * 100).toFixed(0) }}% certeza</template>
               </span>
+              <RouterLink
+                v-if="t.person_id"
+                :to="{ name: 'person', params: { id: t.person_id } }"
+                class="muted small"
+              >ver pessoa →</RouterLink>
             </div>
           </div>
-          <div class="sugg-ops">
-            <button class="button small" @click="approveSuggestion(g)">Aprovar</button>
-            <button class="button small secondary" @click="rejectSuggestion(g)">Rejeitar</button>
-            <RouterLink
-              v-if="g.person_id"
-              :to="{ name: 'person', params: { id: g.person_id } }"
-              class="muted small"
-            >ver pessoa →</RouterLink>
-          </div>
+
+          <ul class="vote-list">
+            <li v-for="v in t.names" :key="v.suggestion_id" class="vote-row">
+              <div class="vote-name">
+                <strong>{{ v.suggested_name }}</strong>
+                <span class="muted small">{{ v.vote_count }} {{ v.vote_count === 1 ? "voto" : "votos" }}</span>
+              </div>
+              <div class="vote-ops">
+                <button class="button small" @click="approveVote(t, v)">Aprovar</button>
+                <button class="button small secondary" @click="rejectVote(t, v)">Rejeitar</button>
+              </div>
+            </li>
+          </ul>
         </li>
       </ul>
     </div>
@@ -514,38 +496,68 @@ function switchTab(t: Tab) {
 }
 .small { font-size: 0.75rem; }
 
-.sugg-list {
+.sugg-cards {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.75rem;
 }
-.sugg-row {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  padding: 0.6rem;
+.sugg-card {
+  padding: 0.75rem;
   background: rgba(11,31,58,0.4);
   border: 1px solid #1d3258;
   border-radius: 10px;
 }
-.sugg-target {
+.sugg-card-head {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  min-width: 0;
-  flex: 1 1 200px;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid #1d3258;
 }
-.sugg-meta { display: flex; flex-direction: column; min-width: 0; }
-.sugg-meta strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sugg-ops {
+.sugg-card-info {
   display: flex;
-  gap: 0.4rem;
+  flex-direction: column;
+  gap: 0.15rem;
+  min-width: 0;
+  flex: 1;
+}
+.sugg-card-info a { text-decoration: none; }
+
+.vote-list {
+  list-style: none;
+  padding: 0;
+  margin: 0.6rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.vote-row {
+  display: flex;
   align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.45rem 0.6rem;
+  background: rgba(255, 211, 78, 0.06);
+  border: 1px solid rgba(255, 211, 78, 0.18);
+  border-radius: 8px;
+  flex-wrap: wrap;
+}
+.vote-name {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.vote-name strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vote-ops {
+  display: flex;
+  gap: 0.35rem;
   flex-wrap: wrap;
 }
 
