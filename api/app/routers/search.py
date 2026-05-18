@@ -117,7 +117,7 @@ async def search_by_face(
         for r in raw:
             if r["distance"] > search_distance:
                 continue
-            meta = r["metadata"] or {}
+            meta = storage.coerce_metadata(r["metadata"])
             url = storage.signed_url(r["storage_bucket"], r["storage_path"])
             thumb = storage.thumb_signed_url(meta, r["storage_bucket"], r["storage_path"])
             photos.append(
@@ -154,7 +154,7 @@ async def search_by_face(
 
     photos = []
     for r in rows:
-        meta = r["metadata"] or {}
+        meta = storage.coerce_metadata(r["metadata"])
         url = storage.signed_url(r["storage_bucket"], r["storage_path"])
         thumb = storage.thumb_signed_url(meta, r["storage_bucket"], r["storage_path"])
         photos.append(

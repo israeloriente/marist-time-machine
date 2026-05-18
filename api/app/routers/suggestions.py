@@ -237,7 +237,7 @@ async def list_pending_by_target(_user: User = CurrentUser) -> list[TargetWithSu
             person_ids,
         )
         for pr in prows:
-            meta = pr["metadata"] or {}
+            meta = storage_svc.coerce_metadata(pr["metadata"])
             person_thumbs[str(pr["person_id"])] = {
                 "bbox": _coerce_bbox(pr["bbox"]),
                 "url": storage_svc.thumb_signed_url(meta, pr["storage_bucket"], pr["storage_path"]),
@@ -258,7 +258,7 @@ async def list_pending_by_target(_user: User = CurrentUser) -> list[TargetWithSu
             face_ids,
         )
         for fr in frows:
-            meta = fr["metadata"] or {}
+            meta = storage_svc.coerce_metadata(fr["metadata"])
             face_thumbs[str(fr["id"])] = {
                 "bbox": _coerce_bbox(fr["bbox"]),
                 "url": storage_svc.thumb_signed_url(meta, fr["storage_bucket"], fr["storage_path"]),

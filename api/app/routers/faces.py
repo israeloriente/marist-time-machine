@@ -83,7 +83,7 @@ async def list_unassigned(
             detection_score=float(r["detection_score"] or 0),
             person_id=r["person_id"],
             signed_url=storage_svc.thumb_signed_url(
-                r["metadata"] or {}, r["storage_bucket"], r["storage_path"]
+                r["metadata"], r["storage_bucket"], r["storage_path"]
             ),
         )
         for r in rows

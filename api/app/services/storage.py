@@ -61,16 +61,36 @@ def public_url(bucket: str, path: str) -> str:
     return f"{_public_base()}/storage/v1/object/public/{bucket}/{path}"
 
 
-def thumb_signed_url(metadata: dict | None, default_bucket: str, default_path: str) -> str:
+def coerce_metadata(raw) -> dict:
+    """Tolerate legacy double-encoded jsonb rows where metadata is a JSON str."""
+    import json
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except json.JSONDecodeError:
+            return {}
+    return {}
+
+
+def thumb_signed_url(metadata, default_bucket: str, default_path: str) -> str:
     """Return a signed URL for the photo's thumbnail.
 
     For videos we expect metadata to contain {thumb_bucket, thumb_path}.
     For photos (and videos that haven't been thumbnailed yet) we fall back
     to the original file.
+
+    metadata may legitimately come in as None, dict, or — for legacy rows
+    that were never normalized — a string. Coerced internally.
     """
-    if metadata and metadata.get("thumb_bucket") and metadata.get("thumb_path"):
+    md = coerce_metadata(metadata)
+    if md.get("thumb_bucket") and md.get("thumb_path"):
         try:
-            return signed_url(metadata["thumb_bucket"], metadata["thumb_path"])
+            return signed_url(md["thumb_bucket"], md["thumb_path"])
         except Exception:
             pass
     return signed_url(default_bucket, default_path)

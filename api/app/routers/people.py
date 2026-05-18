@@ -248,7 +248,7 @@ async def person_photos(person_id: UUID, _user: User = CurrentUser) -> list[dict
     )
     out = []
     for r in rows:
-        meta = r["metadata"] or {}
+        meta = storage_svc.coerce_metadata(r["metadata"])
         out.append({
             "id": str(r["id"]),
             "storage_bucket": r["storage_bucket"],
@@ -285,7 +285,7 @@ async def person_faces(person_id: UUID, _user: User = CurrentUser) -> list[dict]
     )
     out = []
     for r in rows:
-        meta = r["metadata"] or {}
+        meta = storage_svc.coerce_metadata(r["metadata"])
         out.append({
             "id": str(r["id"]),
             "photo_id": str(r["photo_id"]),
