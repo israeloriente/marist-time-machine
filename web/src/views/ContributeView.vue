@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import FaceThumb from "@/components/FaceThumb.vue";
 import {
   facesApi,
   peopleApi,
   suggestionsApi,
+  type AvailableFilters,
   type Face,
   type Person,
 } from "@/services/api";
@@ -16,6 +17,11 @@ const anonymousPeople = ref<Array<Person & { thumb?: Face | null }>>([]);
 const orphanFaces = ref<Face[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
+
+// Filters
+const year = ref<number | "">("");
+const klass = ref<string>("");
+const available = ref<AvailableFilters>({ years: [], classes: [] });
 
 // Cache: target id -> pending suggestion count (so contributor sees momentum)
 const counts = ref<Record<string, number>>({});
@@ -34,12 +40,23 @@ function saveSuggested() {
   localStorage.setItem("mtm.suggested", JSON.stringify(suggested.value));
 }
 
+async function loadFilters() {
+  try {
+    available.value = await peopleApi.filters();
+  } catch {
+    /* silent */
+  }
+}
+
 async function load() {
   loading.value = true;
   error.value = null;
   try {
+    const filters: { year?: number; class?: string } = {};
+    if (year.value !== "") filters.year = year.value;
+    if (klass.value) filters.class = klass.value;
     const [allPeople, faces] = await Promise.all([
-      peopleApi.list(),
+      peopleApi.list(filters),
       facesApi.unassigned(60, 0, 0.5),
     ]);
     // Only show people without display_name (anonymous clusters).
@@ -130,8 +147,18 @@ async function suggestForFace(f: Face) {
 
 const peopleCount = computed(() => anonymousPeople.value.length);
 const facesCount = computed(() => orphanFaces.value.length);
+const hasFilters = computed(() => year.value !== "" || klass.value !== "");
 
-onMounted(load);
+function clearFilters() {
+  year.value = "";
+  klass.value = "";
+}
+
+watch([year, klass], load);
+
+onMounted(async () => {
+  await Promise.all([loadFilters(), load()]);
+});
 </script>
 
 <template>
@@ -141,6 +168,20 @@ onMounted(load);
       Reconheceu alguém? Sugira o nome. Suas sugestões passam por revisão antes
       de entrar na base.
     </p>
+
+    <div class="contrib-filters">
+      <select v-model.number="year" class="input" aria-label="Ano de formatura">
+        <option value="">Todos os anos</option>
+        <option v-for="y in available.years" :key="y" :value="y">{{ y }}</option>
+      </select>
+      <select v-model="klass" class="input" aria-label="Turma">
+        <option value="">Todas as turmas</option>
+        <option v-for="c in available.classes" :key="c" :value="c">{{ c }}</option>
+      </select>
+      <button v-if="hasFilters" type="button" class="button secondary clear" @click="clearFilters">
+        Limpar
+      </button>
+    </div>
 
     <div class="tabs">
       <button :class="{ active: mode === 'people' }" @click="mode = 'people'">
@@ -198,6 +239,23 @@ onMounted(load);
 </template>
 
 <style scoped>
+.contrib-filters {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 0.5rem;
+  margin: 0.75rem 0 0.25rem;
+}
+.contrib-filters .clear {
+  min-height: 44px;
+  padding: 0 1rem;
+}
+@media (max-width: 480px) {
+  .contrib-filters {
+    grid-template-columns: 1fr 1fr;
+  }
+  .contrib-filters .clear { grid-column: 1 / -1; }
+}
+
 .tabs {
   display: flex;
   gap: 0.25rem;

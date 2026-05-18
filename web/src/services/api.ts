@@ -87,6 +87,18 @@ export interface Person {
   display_name: string | null;
   thumbnail_face_id: string | null;
   face_count: number;
+  graduation_years?: number[];
+  classes?: string[];
+}
+
+export interface PeopleFilters {
+  year?: number;
+  class?: string;
+}
+
+export interface AvailableFilters {
+  years: number[];
+  classes: string[];
 }
 
 export interface Face {
@@ -124,7 +136,14 @@ export interface ReclusterStatus {
 }
 
 export const peopleApi = {
-  list: async (): Promise<Person[]> => (await api.get<Person[]>("/people")).data,
+  list: async (filters: PeopleFilters = {}): Promise<Person[]> => {
+    const params: Record<string, string | number> = {};
+    if (filters.year !== undefined) params.year = filters.year;
+    if (filters.class) params.class = filters.class;
+    return (await api.get<Person[]>("/people", { params })).data;
+  },
+  filters: async (): Promise<AvailableFilters> =>
+    (await api.get<AvailableFilters>("/people/filters")).data,
   stats: async (): Promise<ClusterStats> => (await api.get<ClusterStats>("/people/stats")).data,
   status: async (): Promise<ReclusterStatus> =>
     (await api.get<ReclusterStatus>("/people/recluster/status")).data,

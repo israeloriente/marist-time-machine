@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from .. import db
@@ -20,6 +20,8 @@ class PersonOut(BaseModel):
     display_name: str | None
     thumbnail_face_id: UUID | None
     face_count: int
+    graduation_years: list[int] = []
+    classes: list[str] = []
 
 
 class PersonUpdate(BaseModel):
@@ -33,22 +35,130 @@ class MergeRequest(BaseModel):
 
 
 @router.get("", response_model=list[PersonOut])
-async def list_people(limit: int = 100, offset: int = 0, _user: User = CurrentUser) -> list[PersonOut]:
-    rows = await db.fetch(
-        """
+async def list_people(
+    limit: int = 500,
+    offset: int = 0,
+    year: int | None = None,
+    klass: str | None = Query(None, alias="class"),
+    _user: User = CurrentUser,
+) -> list[PersonOut]:
+    """List people with derived graduation_years + classes from their photos.
+
+    Optional filters:
+    - year: only people who appear in at least one photo tagged with this year
+    - klass: only people who appear in at least one photo of this class (A-F)
+
+    Filters are combinable (both must match within the same photo? No — the
+    current schema doesn't pair year+class per photo strictly. We require
+    each filter independently on any photo of the person.)
+    """
+    where_clauses = ["p.is_hidden = false"]
+    params: list = []
+
+    if year is not None:
+        params.append(year)
+        where_clauses.append(
+            f"""exists (
+                select 1
+                from public.faces f2
+                join public.photos ph2 on ph2.id = f2.photo_id
+                where f2.person_id = p.id
+                  and (ph2.metadata->>'graduation_year')::int = ${len(params)}
+            )"""
+        )
+
+    if klass:
+        params.append(klass.upper())
+        where_clauses.append(
+            f"""exists (
+                select 1
+                from public.faces f3
+                join public.photos ph3 on ph3.id = f3.photo_id
+                where f3.person_id = p.id
+                  and upper(ph3.metadata->>'class') = ${len(params)}
+            )"""
+        )
+
+    params.append(limit)
+    params.append(offset)
+    sql = f"""
         select p.id, p.display_name, p.thumbnail_face_id,
-               count(f.id) as face_count
+               count(distinct f.id) as face_count,
+               coalesce(
+                 array_remove(
+                   array_agg(distinct (ph.metadata->>'graduation_year')::int)
+                     filter (where ph.metadata ? 'graduation_year'
+                             and ph.metadata->>'graduation_year' ~ '^\\d+$'),
+                   null
+                 ),
+                 '{{}}'::int[]
+               ) as graduation_years,
+               coalesce(
+                 array_remove(
+                   array_agg(distinct upper(ph.metadata->>'class'))
+                     filter (where ph.metadata ? 'class'
+                             and ph.metadata->>'class' <> ''),
+                   null
+                 ),
+                 '{{}}'::text[]
+               ) as classes
         from public.people p
         left join public.faces f on f.person_id = p.id
-        where p.is_hidden = false
+        left join public.photos ph on ph.id = f.photo_id
+        where {' and '.join(where_clauses)}
         group by p.id
         order by face_count desc, p.created_at desc
-        limit $1 offset $2
-        """,
-        limit,
-        offset,
+        limit ${len(params) - 1} offset ${len(params)}
+    """
+    rows = await db.fetch(sql, *params)
+    return [
+        PersonOut(
+            id=r["id"],
+            display_name=r["display_name"],
+            thumbnail_face_id=r["thumbnail_face_id"],
+            face_count=r["face_count"],
+            graduation_years=sorted(r["graduation_years"]) if r["graduation_years"] else [],
+            classes=sorted(r["classes"]) if r["classes"] else [],
+        )
+        for r in rows
+    ]
+
+
+@router.get("/filters")
+async def filters_available(_user: User = CurrentUser) -> dict:
+    """Return the set of graduation_years and classes that exist in the DB.
+
+    Used by the UI to populate filter dropdowns dynamically (so admin only
+    sees options that actually have data).
+    """
+    row = await db.fetchrow(
+        """
+        select
+          coalesce(
+            array_remove(
+              array_agg(distinct (metadata->>'graduation_year')::int)
+                filter (where metadata ? 'graduation_year'
+                        and metadata->>'graduation_year' ~ '^\\d+$'),
+              null
+            ),
+            '{}'::int[]
+          ) as years,
+          coalesce(
+            array_remove(
+              array_agg(distinct upper(metadata->>'class'))
+                filter (where metadata ? 'class'
+                        and metadata->>'class' <> ''),
+              null
+            ),
+            '{}'::text[]
+          ) as classes
+        from public.photos
+        """
     )
-    return [PersonOut(**dict(r)) for r in rows]
+    return {
+        "years": sorted(row["years"] or []),
+        "classes": sorted(row["classes"] or []),
+    }
 
 
 @router.patch("/{person_id}", response_model=PersonOut)
