@@ -82,6 +82,11 @@ export const router = createRouter({
           component: () => import("@/views/admin/AdminPhotosView.vue"),
         },
         {
+          path: "musicas",
+          name: "admin-songs",
+          component: () => import("@/views/admin/AdminSongsView.vue"),
+        },
+        {
           path: "sugestoes",
           name: "admin-suggestions",
           component: () => import("@/views/admin/AdminSuggestionsView.vue"),

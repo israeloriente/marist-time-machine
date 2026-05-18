@@ -349,6 +349,9 @@ export interface Song {
   thumbnail_url: string | null;
   watch_url: string;
   created_at: string;
+  moderation_status: "pending" | "approved" | "rejected";
+  moderation_note: string | null;
+  moderated_at: string | null;
   user_email: string | null;
   user_graduation_year: number | null;
   user_class_letter: string | null;
@@ -375,6 +378,45 @@ export const songsApi = {
   remove: async (id: string): Promise<void> => {
     await api.delete(`/songs/${id}`);
   },
+};
+
+export const songsModerationApi = {
+  list: async (
+    status_filter: "pending" | "approved" | "rejected" = "pending",
+    limit = 100,
+    offset = 0,
+  ): Promise<Song[]> =>
+    (
+      await api.get<Song[]>("/songs/moderation", {
+        params: { status_filter, limit, offset },
+      })
+    ).data,
+  counts: async (): Promise<ModerationCounts> =>
+    (await api.get<ModerationCounts>("/songs/moderation/counts")).data,
+  approve: async (id: string, note?: string): Promise<Song> =>
+    (await api.post<Song>(`/songs/${id}/approve`, { note: note ?? null })).data,
+  reject: async (id: string, note?: string): Promise<Song> =>
+    (await api.post<Song>(`/songs/${id}/reject`, { note: note ?? null })).data,
+  bulkApprove: async (song_ids: string[], note?: string): Promise<BulkResult> =>
+    (
+      await api.post<BulkResult>("/songs/moderation/bulk-approve", {
+        song_ids,
+        note: note ?? null,
+      })
+    ).data,
+  bulkReject: async (song_ids: string[], note?: string): Promise<BulkResult> =>
+    (
+      await api.post<BulkResult>("/songs/moderation/bulk-reject", {
+        song_ids,
+        note: note ?? null,
+      })
+    ).data,
+  bulkDelete: async (song_ids: string[]): Promise<BulkResult> =>
+    (
+      await api.post<BulkResult>("/songs/moderation/bulk-delete", {
+        song_ids,
+      })
+    ).data,
 };
 
 export const suggestionsApi = {

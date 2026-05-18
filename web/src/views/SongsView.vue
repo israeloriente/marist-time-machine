@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import SongCard from "@/components/SongCard.vue";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import { peopleApi, songsApi, type AvailableFilters, type Song } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 
@@ -95,13 +96,27 @@ async function addSong() {
   }
 }
 
-async function removeSong(id: string) {
-  if (!confirm("Remover esta música da sua lista?")) return;
+const removeTarget = ref<Song | null>(null);
+const removing = ref(false);
+function askRemove(id: string) {
+  removeTarget.value = songs.value.find((s) => s.id === id) ?? null;
+}
+function cancelRemove() {
+  if (removing.value) return;
+  removeTarget.value = null;
+}
+async function confirmRemove() {
+  const target = removeTarget.value;
+  if (!target) return;
+  removing.value = true;
   try {
-    await songsApi.remove(id);
-    songs.value = songs.value.filter((s) => s.id !== id);
+    await songsApi.remove(target.id);
+    songs.value = songs.value.filter((s) => s.id !== target.id);
+    removeTarget.value = null;
   } catch (e: any) {
     alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } finally {
+    removing.value = false;
   }
 }
 
@@ -181,11 +196,22 @@ onMounted(async () => {
           :key="s.id"
           :song="s"
           :can-remove="s.user_id === currentUserId"
-          @remove="removeSong"
+          @remove="askRemove"
         />
       </div>
     </section>
   </div>
+
+  <ConfirmDialog
+    :open="removeTarget !== null"
+    :title="'Remover esta música?'"
+    :message="removeTarget?.title || 'Vídeo do YouTube'"
+    :confirm-label="'Remover'"
+    variant="danger"
+    :busy="removing"
+    @close="cancelRemove"
+    @confirm="confirmRemove"
+  />
 </template>
 
 <style scoped>

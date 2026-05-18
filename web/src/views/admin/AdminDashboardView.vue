@@ -6,6 +6,7 @@ import {
   moderationApi,
   peopleApi,
   regenerateVideoThumbnails,
+  songsModerationApi,
   suggestionsApi,
   type ClusterStats,
   type ModerationCounts,
@@ -16,21 +17,24 @@ const stats = ref<ClusterStats | null>(null);
 const status = ref<ReclusterStatus | null>(null);
 const suggestionsPending = ref<number>(0);
 const photoCounts = ref<ModerationCounts>({ pending: 0, approved: 0, rejected: 0 });
+const songCounts = ref<ModerationCounts>({ pending: 0, approved: 0, rejected: 0 });
 const reclusterBusy = ref(false);
 const dedupeBusy = ref(false);
 const thumbsBusy = ref(false);
 
 async function load() {
-  const [s, st, sug, pc] = await Promise.all([
+  const [s, st, sug, pc, sc] = await Promise.all([
     peopleApi.stats().catch(() => null),
     peopleApi.status().catch(() => null),
     suggestionsApi.pendingByTarget().catch(() => []),
     moderationApi.counts().catch(() => ({ pending: 0, approved: 0, rejected: 0 })),
+    songsModerationApi.counts().catch(() => ({ pending: 0, approved: 0, rejected: 0 })),
   ]);
   stats.value = s;
   status.value = st;
   suggestionsPending.value = sug.length;
   photoCounts.value = pc;
+  songCounts.value = sc;
 }
 
 const clusteredPct = computed(() => {
@@ -133,6 +137,11 @@ onMounted(load);
     <RouterLink to="/admin/fotos" class="kpi-card" :class="{ highlight: photoCounts.pending > 0 }">
       <span class="kpi-label">Fotos pendentes</span>
       <strong class="kpi-value">{{ photoCounts.pending }}</strong>
+      <span class="kpi-sub muted">aguardam aprovação</span>
+    </RouterLink>
+    <RouterLink to="/admin/musicas" class="kpi-card" :class="{ highlight: songCounts.pending > 0 }">
+      <span class="kpi-label">Músicas pendentes</span>
+      <strong class="kpi-value">{{ songCounts.pending }}</strong>
       <span class="kpi-sub muted">aguardam aprovação</span>
     </RouterLink>
     <RouterLink to="/admin/sugestoes" class="kpi-card highlight">

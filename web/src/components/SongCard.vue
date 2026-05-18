@@ -54,7 +54,19 @@ const placeholder =
     </div>
 
     <div class="info">
-      <strong class="title">{{ song.title || "Vídeo do YouTube" }}</strong>
+      <div class="title-row">
+        <strong class="title">{{ song.title || "Vídeo do YouTube" }}</strong>
+        <span
+          v-if="canRemove && song.moderation_status === 'pending'"
+          class="status-badge pending"
+          title="Aguardando aprovação do admin para aparecer pra todo mundo"
+        >Aguardando aprovação</span>
+        <span
+          v-if="canRemove && song.moderation_status === 'rejected'"
+          class="status-badge rejected"
+          :title="song.moderation_note || 'Rejeitada pela moderação'"
+        >Rejeitada</span>
+      </div>
       <span v-if="song.channel" class="muted small">{{ song.channel }}</span>
       <p v-if="song.caption" class="caption">"{{ song.caption }}"</p>
 
@@ -174,4 +186,27 @@ const placeholder =
 }
 .remove:hover { background: rgba(214, 58, 58, 0.1); }
 .small { font-size: 0.78rem; }
+
+.title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.status-badge {
+  font-size: 0.7rem;
+  font-weight: 700;
+  padding: 0.15rem 0.55rem;
+  border-radius: 99px;
+  white-space: nowrap;
+  letter-spacing: 0.02em;
+}
+.status-badge.pending {
+  background: rgba(247, 201, 72, 0.25);
+  color: #8a6913;
+}
+.status-badge.rejected {
+  background: rgba(214, 58, 58, 0.12);
+  color: var(--error);
+}
 </style>

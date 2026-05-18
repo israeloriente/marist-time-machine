@@ -2,6 +2,9 @@
 
 The UI groups by uploader's graduation_year+class_letter (from user_profiles)
 into a "trilha sonora da turma" mural; user can also see/edit their own list.
+
+Songs must be approved by an admin before they show up in the public mural
+or the kiosk soundtrack (mirrors the photo moderation flow).
 """
 
 from __future__ import annotations
@@ -33,6 +36,9 @@ class SongOut(BaseModel):
     thumbnail_url: str | None
     watch_url: str
     created_at: str
+    moderation_status: str = "approved"
+    moderation_note: str | None = None
+    moderated_at: str | None = None
     # User profile info (denormalized for the mural)
     user_email: str | None = None
     user_graduation_year: int | None = None
@@ -57,10 +63,29 @@ def _to_song_out(r) -> SongOut:
         thumbnail_url=r["thumbnail_url"],
         watch_url=youtube.watch_url(r["youtube_id"]),
         created_at=r["created_at"].isoformat(),
+        moderation_status=_safe(r, "moderation_status") or "approved",
+        moderation_note=_safe(r, "moderation_note"),
+        moderated_at=(
+            r["moderated_at"].isoformat()
+            if _safe(r, "moderated_at") else None
+        ),
         user_email=_safe(r, "user_email"),
         user_graduation_year=_safe(r, "user_graduation_year"),
         user_class_letter=_safe(r, "user_class_letter"),
     )
+
+
+_SELECT_BASE = """
+    select s.id, s.user_id, s.youtube_id, s.title, s.channel, s.caption,
+           s.thumbnail_url, s.created_at,
+           s.moderation_status, s.moderation_note, s.moderated_at,
+           u.email as user_email,
+           up.graduation_year as user_graduation_year,
+           up.class_letter   as user_class_letter
+    from public.songs s
+    left join public.user_profiles up on up.user_id = s.user_id
+    left join auth.users u            on u.id      = s.user_id
+"""
 
 
 @router.get("", response_model=list[SongOut])
@@ -69,10 +94,12 @@ async def list_songs(
     klass: str | None = Query(None, alias="class"),
     user_id: UUID | None = None,
     limit: int = 200,
-    _user: User = CurrentUser,
+    user: User = CurrentUser,
 ) -> list[SongOut]:
-    """List all songs (mural) with uploader profile info.
+    """List songs (mural) with uploader profile info.
 
+    Approved songs are visible to everyone. Each user additionally sees
+    their own pending/rejected songs so they can track moderation status.
     Optional filters: ?year, ?class, ?user_id.
     """
     where: list[str] = []
@@ -88,18 +115,17 @@ async def list_songs(
         params.append(user_id)
         where.append(f"s.user_id = ${len(params)}")
 
-    where_sql = ("where " + " and ".join(where)) if where else ""
+    params.append(UUID(user.id))
+    visibility = (
+        f"(s.moderation_status = 'approved' or s.user_id = ${len(params)})"
+    )
+    where.append(visibility)
+
+    where_sql = "where " + " and ".join(where)
 
     params.append(limit)
     sql = f"""
-        select s.id, s.user_id, s.youtube_id, s.title, s.channel, s.caption,
-               s.thumbnail_url, s.created_at,
-               u.email as user_email,
-               up.graduation_year as user_graduation_year,
-               up.class_letter   as user_class_letter
-        from public.songs s
-        left join public.user_profiles up on up.user_id = s.user_id
-        left join auth.users u            on u.id      = s.user_id
+        {_SELECT_BASE}
         {where_sql}
         order by s.created_at desc
         limit ${len(params)}
@@ -115,12 +141,13 @@ async def random_songs(
     limit: int = 20,
     fallback_any: bool = True,
 ) -> list[SongOut]:
-    """Random songs scoped to a class+year (best-effort).
+    """Random APPROVED songs scoped to a class+year (best-effort).
 
     For the kiosk soundtrack: try songs from the requested year first; if
-    nothing, fall back to any song so we never get total silence.
+    nothing, fall back to any approved song so we never get total silence.
+    Anonymous endpoint — never returns pending/rejected.
     """
-    where: list[str] = []
+    where: list[str] = ["s.moderation_status = 'approved'"]
     params: list = []
     if year is not None:
         params.append(year)
@@ -130,26 +157,16 @@ async def random_songs(
         where.append(f"up.class_letter = ${len(params)}")
 
     params.append(limit)
-    base_sql = """
-        select s.id, s.user_id, s.youtube_id, s.title, s.channel, s.caption,
-               s.thumbnail_url, s.created_at,
-               u.email as user_email,
-               up.graduation_year as user_graduation_year,
-               up.class_letter   as user_class_letter
-        from public.songs s
-        left join public.user_profiles up on up.user_id = s.user_id
-        left join auth.users u            on u.id      = s.user_id
-    """
-    where_sql = ("where " + " and ".join(where)) if where else ""
+    where_sql = "where " + " and ".join(where)
     rows = await db.fetch(
-        f"{base_sql} {where_sql} order by random() limit ${len(params)}",
+        f"{_SELECT_BASE} {where_sql} order by random() limit ${len(params)}",
         *params,
     )
 
     if not rows and fallback_any:
-        # Repeat without filters
         rows = await db.fetch(
-            f"{base_sql} order by random() limit $1",
+            f"{_SELECT_BASE} where s.moderation_status = 'approved' "
+            f"order by random() limit $1",
             limit,
         )
 
@@ -159,15 +176,8 @@ async def random_songs(
 @router.get("/mine", response_model=list[SongOut])
 async def my_songs(user: User = CurrentUser) -> list[SongOut]:
     rows = await db.fetch(
-        """
-        select s.id, s.user_id, s.youtube_id, s.title, s.channel, s.caption,
-               s.thumbnail_url, s.created_at,
-               u.email as user_email,
-               up.graduation_year as user_graduation_year,
-               up.class_letter   as user_class_letter
-        from public.songs s
-        left join public.user_profiles up on up.user_id = s.user_id
-        left join auth.users u            on u.id      = s.user_id
+        f"""
+        {_SELECT_BASE}
         where s.user_id = $1
         order by s.created_at desc
         """,
@@ -182,7 +192,6 @@ async def create_song(body: SongIn, user: User = CurrentUser) -> SongOut:
     if not vid:
         raise HTTPException(status_code=400, detail="URL do YouTube inválida")
 
-    # Enrich (best-effort)
     meta = await youtube.fetch_oembed(vid)
     caption = (body.caption or "").strip() or None
 
@@ -190,10 +199,12 @@ async def create_song(body: SongIn, user: User = CurrentUser) -> SongOut:
         row = await db.fetchrow(
             """
             insert into public.songs
-              (user_id, youtube_id, title, channel, caption, thumbnail_url)
-            values ($1, $2, $3, $4, $5, $6)
+              (user_id, youtube_id, title, channel, caption, thumbnail_url,
+               moderation_status)
+            values ($1, $2, $3, $4, $5, $6, 'pending')
             returning id, user_id, youtube_id, title, channel, caption,
-                      thumbnail_url, created_at
+                      thumbnail_url, created_at, moderation_status,
+                      moderation_note, moderated_at
             """,
             UUID(user.id),
             vid,
@@ -209,7 +220,6 @@ async def create_song(body: SongIn, user: User = CurrentUser) -> SongOut:
             ) from exc
         raise
 
-    # Compose return with profile info
     prof = await db.fetchrow(
         """
         select u.email, up.graduation_year, up.class_letter
@@ -231,6 +241,9 @@ async def create_song(body: SongIn, user: User = CurrentUser) -> SongOut:
         thumbnail_url=row["thumbnail_url"],
         watch_url=youtube.watch_url(row["youtube_id"]),
         created_at=row["created_at"].isoformat(),
+        moderation_status=row["moderation_status"],
+        moderation_note=row["moderation_note"],
+        moderated_at=row["moderated_at"].isoformat() if row["moderated_at"] else None,
         user_email=(prof or {}).get("email"),
         user_graduation_year=(prof or {}).get("graduation_year"),
         user_class_letter=(prof or {}).get("class_letter"),
@@ -257,25 +270,155 @@ async def update_song(song_id: UUID, body: SongPatch, user: User = CurrentUser) 
         raise HTTPException(status_code=404, detail="music not found or not yours")
 
     row = await db.fetchrow(
-        """
-        select s.id, s.user_id, s.youtube_id, s.title, s.channel, s.caption,
-               s.thumbnail_url, s.created_at,
-               u.email as user_email,
-               up.graduation_year as user_graduation_year,
-               up.class_letter   as user_class_letter
-        from public.songs s
-        left join public.user_profiles up on up.user_id = s.user_id
-        left join auth.users u            on u.id      = s.user_id
-        where s.id = $1
-        """,
+        f"{_SELECT_BASE} where s.id = $1",
         song_id,
     )
     assert row is not None
     return _to_song_out(row)
 
 
+# =====================================================================
+# Admin moderation
+# =====================================================================
+
+class SongModerationOut(SongOut):
+    """Same shape as SongOut — kept as alias for the admin queue endpoint."""
+
+
+@router.get("/moderation", response_model=list[SongModerationOut])
+async def list_for_moderation(
+    status_filter: str = "pending",
+    limit: int = 100,
+    offset: int = 0,
+    _user: User = CurrentUser,
+) -> list[SongModerationOut]:
+    """Admin queue: list songs by moderation status."""
+    if status_filter not in {"pending", "approved", "rejected"}:
+        raise HTTPException(status_code=400, detail="status must be pending|approved|rejected")
+    rows = await db.fetch(
+        f"""
+        {_SELECT_BASE}
+        where s.moderation_status = $1
+        order by s.created_at desc
+        limit $2 offset $3
+        """,
+        status_filter,
+        limit,
+        offset,
+    )
+    return [SongModerationOut(**_to_song_out(r).model_dump()) for r in rows]
+
+
+@router.get("/moderation/counts")
+async def moderation_counts(_user: User = CurrentUser) -> dict:
+    row = await db.fetchrow(
+        """
+        select
+          count(*) filter (where moderation_status = 'pending')  as pending,
+          count(*) filter (where moderation_status = 'approved') as approved,
+          count(*) filter (where moderation_status = 'rejected') as rejected
+        from public.songs
+        """
+    )
+    return dict(row) if row else {"pending": 0, "approved": 0, "rejected": 0}
+
+
+class ModerationDecision(BaseModel):
+    note: str | None = None
+
+
+@router.post("/{song_id}/approve", response_model=SongModerationOut)
+async def approve_song(
+    song_id: UUID, body: ModerationDecision | None = None, user: User = CurrentUser
+) -> SongModerationOut:
+    return await _set_moderation(song_id, "approved", body, user)
+
+
+@router.post("/{song_id}/reject", response_model=SongModerationOut)
+async def reject_song(
+    song_id: UUID, body: ModerationDecision | None = None, user: User = CurrentUser
+) -> SongModerationOut:
+    return await _set_moderation(song_id, "rejected", body, user)
+
+
+async def _set_moderation(
+    song_id: UUID, status_str: str, body: ModerationDecision | None, user: User,
+) -> SongModerationOut:
+    note = (body.note.strip() if body and body.note else None) or None
+    result = await db.execute(
+        """
+        update public.songs
+           set moderation_status = $1,
+               moderation_note = $2,
+               moderated_at = now(),
+               moderated_by = $3
+         where id = $4
+        """,
+        status_str,
+        note,
+        UUID(user.id),
+        song_id,
+    )
+    if result.endswith(" 0"):
+        raise HTTPException(status_code=404, detail="song not found")
+
+    row = await db.fetchrow(f"{_SELECT_BASE} where s.id = $1", song_id)
+    assert row is not None
+    return SongModerationOut(**_to_song_out(row).model_dump())
+
+
+class BulkRequest(BaseModel):
+    song_ids: list[UUID]
+    note: str | None = None
+
+
+class BulkResult(BaseModel):
+    succeeded: list[UUID]
+    failed: list[dict]
+
+
+@router.post("/moderation/bulk-approve", response_model=BulkResult)
+async def bulk_approve(body: BulkRequest, user: User = CurrentUser) -> BulkResult:
+    return await _bulk_moderate(body, "approved", user)
+
+
+@router.post("/moderation/bulk-reject", response_model=BulkResult)
+async def bulk_reject(body: BulkRequest, user: User = CurrentUser) -> BulkResult:
+    return await _bulk_moderate(body, "rejected", user)
+
+
+async def _bulk_moderate(body: BulkRequest, status_str: str, user: User) -> BulkResult:
+    if not body.song_ids:
+        return BulkResult(succeeded=[], failed=[])
+    note = (body.note.strip() if body.note else None) or None
+    await db.execute(
+        """
+        update public.songs
+           set moderation_status = $1,
+               moderation_note   = $2,
+               moderated_at      = now(),
+               moderated_by      = $3
+         where id = any($4::uuid[])
+        """,
+        status_str,
+        note,
+        UUID(user.id),
+        body.song_ids,
+    )
+    return BulkResult(succeeded=body.song_ids, failed=[])
+
+
+# =====================================================================
+# Delete
+# Admins can delete any song; regular users can only delete their own.
+# =====================================================================
+
 @router.delete("/{song_id}", status_code=204)
 async def delete_song(song_id: UUID, user: User = CurrentUser):
+    """Owner removes their own song from the DB.
+
+    Admins use POST /moderation/bulk-delete to remove songs from other users.
+    """
     result = await db.execute(
         "delete from public.songs where id = $1 and user_id = $2",
         song_id,
@@ -284,3 +427,14 @@ async def delete_song(song_id: UUID, user: User = CurrentUser):
     if result.endswith(" 0"):
         raise HTTPException(status_code=404, detail="music not found or not yours")
     return None
+
+
+@router.post("/moderation/bulk-delete", response_model=BulkResult)
+async def bulk_delete(body: BulkRequest, _user: User = CurrentUser) -> BulkResult:
+    if not body.song_ids:
+        return BulkResult(succeeded=[], failed=[])
+    await db.execute(
+        "delete from public.songs where id = any($1::uuid[])",
+        body.song_ids,
+    )
+    return BulkResult(succeeded=body.song_ids, failed=[])
