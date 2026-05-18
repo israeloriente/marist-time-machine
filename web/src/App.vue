@@ -32,19 +32,20 @@ async function signOut() {
   <!-- Admin / kiosk routes render full-screen — no public topbar. -->
   <RouterView v-if="hideTopbar" />
 
-  <div v-else class="layout">
+  <div v-else class="layout" :class="{ 'has-tabbar': !!auth.session }">
     <header class="topbar">
       <RouterLink to="/" class="brand">
         <span class="dot" />
         <span class="brand-full">Marist Time Machine</span>
         <span class="brand-short">Time Machine</span>
       </RouterLink>
-      <nav v-if="auth.session">
-        <RouterLink to="/capture">Buscar</RouterLink>
-        <RouterLink to="/upload">Adicionar</RouterLink>
-        <RouterLink to="/contribute">Identificar</RouterLink>
-        <RouterLink to="/musicas">Músicas</RouterLink>
-        <RouterLink to="/perfil" class="icon-link" title="Meu perfil">
+      <nav v-if="auth.session" class="topbar-nav">
+        <!-- Desktop-only links (mobile uses the bottom tabbar) -->
+        <RouterLink to="/capture" class="desktop-only">Buscar</RouterLink>
+        <RouterLink to="/upload" class="desktop-only">Adicionar</RouterLink>
+        <RouterLink to="/contribute" class="desktop-only">Identificar</RouterLink>
+        <RouterLink to="/musicas" class="desktop-only">Músicas</RouterLink>
+        <RouterLink to="/perfil" class="icon-link desktop-only" title="Meu perfil">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
             <circle cx="12" cy="7" r="4"/>
@@ -62,6 +63,47 @@ async function signOut() {
     <main>
       <RouterView />
     </main>
+
+    <!-- Bottom tab bar (mobile only) -->
+    <nav v-if="auth.session" class="tabbar" aria-label="Navegação principal">
+      <RouterLink to="/capture" class="tab" active-class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="7"/>
+          <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <span>Buscar</span>
+      </RouterLink>
+      <RouterLink to="/upload" class="tab" active-class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 13V3"/><path d="m7 8 5-5 5 5"/><path d="M21 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-6"/>
+        </svg>
+        <span>Adicionar</span>
+      </RouterLink>
+      <RouterLink to="/contribute" class="tab" active-class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-3-3.87"/>
+          <path d="M4 21v-2a4 4 0 0 1 3-3.87"/>
+          <circle cx="12" cy="7" r="4"/>
+          <path d="m9 17 2 2 4-4"/>
+        </svg>
+        <span>Identificar</span>
+      </RouterLink>
+      <RouterLink to="/musicas" class="tab" active-class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M9 18V5l12-2v13"/>
+          <circle cx="6" cy="18" r="3"/>
+          <circle cx="18" cy="16" r="3"/>
+        </svg>
+        <span>Músicas</span>
+      </RouterLink>
+      <RouterLink to="/perfil" class="tab" active-class="active">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+          <circle cx="12" cy="7" r="4"/>
+        </svg>
+        <span>Perfil</span>
+      </RouterLink>
+    </nav>
   </div>
 </template>
 
@@ -70,5 +112,53 @@ async function signOut() {
   display: inline-flex;
   align-items: center;
   padding: 0.4rem;
+}
+
+/* ----- Mobile topbar: collapse the link nav ----- */
+.topbar-nav .desktop-only { display: none; }
+@media (min-width: 720px) {
+  .topbar-nav .desktop-only { display: inline-flex; }
+}
+
+/* ----- Bottom tab bar (mobile only) ----- */
+.tabbar {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 15;
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  background: var(--marista-navy);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: min(var(--safe-bottom), 40px);
+  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.15);
+}
+.tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  padding: 0.55rem 0.25rem 0.4rem;
+  color: rgba(255, 255, 255, 0.6);
+  text-decoration: none;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  min-height: 56px;
+  transition: color 0.12s;
+}
+.tab svg {
+  width: 22px;
+  height: 22px;
+  flex-shrink: 0;
+}
+.tab:hover { color: var(--marista-white); }
+.tab.active {
+  color: var(--marista-yellow);
+}
+
+/* Hide on desktop — that uses the topbar nav links instead. */
+@media (min-width: 720px) {
+  .tabbar { display: none; }
 }
 </style>
