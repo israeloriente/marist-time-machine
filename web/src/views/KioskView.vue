@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
-import { RouterLink } from "vue-router";
 import {
   randomPhotos,
   searchByFace,
@@ -10,7 +9,14 @@ import {
   type Song,
 } from "@/services/api";
 
-type Phase = "idle" | "loading-camera" | "ready" | "running" | "reveal" | "results";
+type Phase =
+  | "idle"
+  | "loading-camera"
+  | "ready"
+  | "running"
+  | "reveal"
+  | "results"
+  | "year-photos";
 
 const phase = ref<Phase>("idle");
 const error = ref<string | null>(null);
@@ -51,18 +57,59 @@ const totalSteps = 4; // pseudo progress
 const progressStep = ref(0);
 
 // Lightbox (in-app modal for the results grid)
+// source: 'match' = personal matches, 'year' = full graduation-year roll
+type LightboxSource = "match" | "year";
 const lightboxIdx = ref<number | null>(null);
-function openLightbox(idx: number) {
+const lightboxSource = ref<LightboxSource>("match");
+function openLightbox(idx: number, source: LightboxSource = "match") {
+  lightboxSource.value = source;
   lightboxIdx.value = idx;
 }
 function closeLightbox() {
   lightboxIdx.value = null;
 }
 
+const lightboxList = computed(() => {
+  if (lightboxSource.value === "year") {
+    return yearPhotos.value.map((p) => ({
+      signed_url: p.signed_url,
+      thumb_signed_url: p.thumb_signed_url,
+      media_type: "image" as const,
+    }));
+  }
+  return (result.value?.photos ?? []).map((p) => ({
+    signed_url: p.signed_url,
+    thumb_signed_url: p.thumb_signed_url,
+    media_type: p.media_type,
+  }));
+});
+
+// Year photos (full graduation-year roll, shown after personal matches)
+const yearPhotos = ref<RandomPhoto[]>([]);
+const yearPhotosLoading = ref(false);
+
+async function showYearPhotos() {
+  phase.value = "year-photos";
+  if (yearPhotos.value.length) return; // already loaded
+  yearPhotosLoading.value = true;
+  try {
+    yearPhotos.value = await randomPhotos(120, selectedYear.value);
+  } catch (e) {
+    console.error("year photos failed", e);
+    yearPhotos.value = [];
+  } finally {
+    yearPhotosLoading.value = false;
+  }
+}
+
+function backToResults() {
+  phase.value = "results";
+}
+
 // Keyboard navigation for the lightbox
 function onLightboxKey(e: KeyboardEvent) {
   if (lightboxIdx.value === null) return;
-  const total = result.value?.photos.length ?? 0;
+  const total = lightboxList.value.length;
   if (e.key === "Escape") {
     closeLightbox();
   } else if (e.key === "ArrowRight" && lightboxIdx.value < total - 1) {
@@ -273,6 +320,14 @@ async function startJourney() {
   const res = searchP ? await searchP : ({ person_id: null, matched_faces: 0, photos: [] } as SearchResponse);
   result.value = res;
 
+  // 5) Preload every reveal photo in parallel BEFORE the reveal starts —
+  //    music keeps playing so the user feels the moment building up. We
+  //    cap the wait so a single slow URL doesn't keep them staring at the
+  //    slideshow forever.
+  if (res.photos.length) {
+    await preloadAllRevealPhotos(res.photos.slice(0, MAX_REVEAL_PHOTOS));
+  }
+
   // Stop the ambient slideshow and camera; music keeps playing.
   stopCamera();
   stopSlideshow();
@@ -284,6 +339,24 @@ async function startJourney() {
   } else {
     phase.value = "results";
   }
+}
+
+const PRELOAD_MAX_WAIT_MS = 6000;
+
+function preloadAllRevealPhotos(items: { signed_url: string; thumb_signed_url?: string | null }[]): Promise<void> {
+  const loads = items.map(
+    (p) =>
+      new Promise<void>((resolve) => {
+        const img = new Image();
+        const done = () => resolve();
+        img.onload = done;
+        img.onerror = done;
+        img.src = p.thumb_signed_url || p.signed_url;
+      }),
+  );
+  const all = Promise.allSettled(loads).then(() => undefined);
+  const timeout = new Promise<void>((r) => setTimeout(r, PRELOAD_MAX_WAIT_MS));
+  return Promise.race([all, timeout]);
 }
 
 function totalReveal(): number {
@@ -408,6 +481,8 @@ function reset() {
   stopReveal();
   result.value = null;
   photos.value = [];
+  yearPhotos.value = [];
+  yearPhotosLoading.value = false;
   songs.value = [];
   currentSongIdx.value = 0;
   currentSongTitle.value = "";
@@ -469,9 +544,6 @@ onBeforeUnmount(() => {
       autoplay
     />
     <div ref="playerEl" class="hidden-player" aria-hidden="true" />
-
-    <!-- Tiny exit button (hold for 3s to leave kiosk) -->
-    <RouterLink to="/" class="kiosk-exit" title="Sair do modo kiosk">×</RouterLink>
 
     <!-- IDLE / READY: hero with year picker and CTA -->
     <transition name="fade">
@@ -620,21 +692,67 @@ onBeforeUnmount(() => {
             :key="p.photo_id"
             type="button"
             class="result-tile"
-            @click="openLightbox(idx)"
+            @click="openLightbox(idx, 'match')"
           >
             <img :src="p.thumb_signed_url || p.signed_url" alt="" loading="lazy" />
             <span v-if="p.media_type === 'video'" class="video-pill">▶ vídeo</span>
           </button>
         </div>
 
-        <button class="big-cta secondary" type="button" @click="reset">Procurar de novo</button>
+        <div class="results-actions">
+          <button class="big-cta" type="button" @click="showYearPhotos">
+            Ver mais fotos da turma {{ selectedYear }}
+          </button>
+          <button class="big-cta secondary" type="button" @click="reset">
+            Procurar de novo
+          </button>
+        </div>
+      </section>
+    </transition>
+
+    <!-- YEAR PHOTOS: full roll of the selected graduation year -->
+    <transition name="fade">
+      <section v-if="phase === 'year-photos'" class="results">
+        <div class="results-head">
+          <span class="kicker">Turma {{ selectedYear }}</span>
+          <h2>Memórias da turma de {{ selectedYear }}</h2>
+          <p class="muted">Todas as fotos do acervo desse ano.</p>
+        </div>
+
+        <div v-if="yearPhotosLoading" class="year-loading">
+          <div class="skeleton-shimmer" />
+          <p class="skeleton-text">Carregando memórias…</p>
+        </div>
+
+        <div v-else-if="yearPhotos.length" class="results-grid">
+          <button
+            v-for="(p, idx) in yearPhotos"
+            :key="p.id"
+            type="button"
+            class="result-tile"
+            @click="openLightbox(idx, 'year')"
+          >
+            <img :src="p.thumb_signed_url || p.signed_url" alt="" loading="lazy" />
+          </button>
+        </div>
+
+        <p v-else class="muted">Ainda não temos fotos catalogadas dessa turma.</p>
+
+        <div class="results-actions">
+          <button class="big-cta secondary" type="button" @click="backToResults">
+            ← Voltar às minhas fotos
+          </button>
+          <button class="big-cta secondary" type="button" @click="reset">
+            Procurar de novo
+          </button>
+        </div>
       </section>
     </transition>
 
     <!-- LIGHTBOX (in-app modal for full-size view) -->
     <transition name="fade">
       <div
-        v-if="lightboxIdx !== null && result"
+        v-if="lightboxIdx !== null && lightboxList.length"
         class="lightbox"
         role="dialog"
         aria-modal="true"
@@ -648,7 +766,7 @@ onBeforeUnmount(() => {
           @click="lightboxIdx = (lightboxIdx ?? 0) - 1"
         >‹</button>
         <button
-          v-if="lightboxIdx < result.photos.length - 1"
+          v-if="lightboxIdx < lightboxList.length - 1"
           class="lightbox-nav next"
           aria-label="Próxima"
           @click="lightboxIdx = (lightboxIdx ?? 0) + 1"
@@ -656,21 +774,21 @@ onBeforeUnmount(() => {
 
         <div class="lightbox-media">
           <video
-            v-if="result.photos[lightboxIdx].media_type === 'video'"
-            :src="result.photos[lightboxIdx].signed_url"
+            v-if="lightboxList[lightboxIdx].media_type === 'video'"
+            :src="lightboxList[lightboxIdx].signed_url"
             controls
             autoplay
             playsinline
           />
           <img
             v-else
-            :src="result.photos[lightboxIdx].signed_url"
+            :src="lightboxList[lightboxIdx].signed_url"
             alt=""
           />
         </div>
 
         <p class="lightbox-counter">
-          {{ lightboxIdx + 1 }} / {{ result.photos.length }}
+          {{ lightboxIdx + 1 }} / {{ lightboxList.length }}
         </p>
       </div>
     </transition>
@@ -1193,27 +1311,18 @@ onBeforeUnmount(() => {
   margin: 0;
 }
 
-/* Tiny exit button — discreet, top-right corner */
-.kiosk-exit {
-  position: fixed;
-  top: 0.6rem;
-  right: 0.8rem;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  display: inline-flex;
-  align-items: center;
+.results-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
   justify-content: center;
-  background: rgba(255, 255, 255, 0.04);
-  color: rgba(255, 255, 255, 0.3);
-  text-decoration: none;
-  font-size: 1.1rem;
-  font-weight: 300;
-  z-index: 100;
-  transition: background 0.15s, color 0.15s;
+  margin-top: 0.5rem;
 }
-.kiosk-exit:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: var(--marista-white);
+.year-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  padding: 3rem 0;
 }
 </style>
