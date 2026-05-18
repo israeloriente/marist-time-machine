@@ -118,6 +118,7 @@ async def recluster_status(_user: User = CurrentUser) -> dict:
 
 @router.get("/{person_id}/photos")
 async def person_photos(person_id: UUID, _user: User = CurrentUser) -> list[dict]:
+    from ..services import storage as storage_svc
     rows = await db.fetch(
         """
         select distinct p.id, p.storage_bucket, p.storage_path, p.uploaded_at, p.metadata
@@ -128,13 +129,41 @@ async def person_photos(person_id: UUID, _user: User = CurrentUser) -> list[dict
         """,
         person_id,
     )
-    return [
-        {
+    out = []
+    for r in rows:
+        out.append({
             "id": str(r["id"]),
             "storage_bucket": r["storage_bucket"],
             "storage_path": r["storage_path"],
             "uploaded_at": r["uploaded_at"].isoformat(),
             "metadata": r["metadata"],
-        }
-        for r in rows
-    ]
+            "signed_url": storage_svc.signed_url(r["storage_bucket"], r["storage_path"]),
+        })
+    return out
+
+
+@router.get("/{person_id}/faces")
+async def person_faces(person_id: UUID, _user: User = CurrentUser) -> list[dict]:
+    """List all faces assigned to this person with bbox + parent photo URL."""
+    from ..services import storage as storage_svc
+    rows = await db.fetch(
+        """
+        select f.id, f.bbox, f.detection_score, p.id as photo_id,
+               p.storage_bucket, p.storage_path
+        from public.faces f
+        join public.photos p on p.id = f.photo_id
+        where f.person_id = $1
+        order by f.detection_score desc nulls last
+        """,
+        person_id,
+    )
+    out = []
+    for r in rows:
+        out.append({
+            "id": str(r["id"]),
+            "photo_id": str(r["photo_id"]),
+            "bbox": r["bbox"],
+            "detection_score": float(r["detection_score"] or 0),
+            "signed_url": storage_svc.signed_url(r["storage_bucket"], r["storage_path"]),
+        })
+    return out

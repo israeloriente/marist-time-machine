@@ -68,3 +68,76 @@ export async function uploadPhoto(
   });
   return data;
 }
+
+// ---------- People / Faces ----------
+
+export interface Person {
+  id: string;
+  display_name: string | null;
+  thumbnail_face_id: string | null;
+  face_count: number;
+}
+
+export interface Face {
+  id: string;
+  photo_id: string;
+  bbox: number[]; // [x1, y1, x2, y2]
+  detection_score: number;
+  person_id?: string | null;
+  signed_url: string;
+}
+
+export interface PersonPhoto {
+  id: string;
+  storage_bucket: string;
+  storage_path: string;
+  uploaded_at: string;
+  metadata: Record<string, unknown>;
+  signed_url: string;
+}
+
+export interface ClusterStats {
+  faces_total: number;
+  faces_clustered: number;
+  people: number;
+}
+
+export interface ReclusterStatus {
+  next_run_at: string | null;
+  last: {
+    started_at: string;
+    finished_at: string;
+    result?: { faces_processed: number; faces_assigned: number; people_created: number };
+    error?: string;
+  } | null;
+}
+
+export const peopleApi = {
+  list: async (): Promise<Person[]> => (await api.get<Person[]>("/people")).data,
+  stats: async (): Promise<ClusterStats> => (await api.get<ClusterStats>("/people/stats")).data,
+  status: async (): Promise<ReclusterStatus> =>
+    (await api.get<ReclusterStatus>("/people/recluster/status")).data,
+  faces: async (personId: string): Promise<Face[]> =>
+    (await api.get<Face[]>(`/people/${personId}/faces`)).data,
+  photos: async (personId: string): Promise<PersonPhoto[]> =>
+    (await api.get<PersonPhoto[]>(`/people/${personId}/photos`)).data,
+  rename: async (personId: string, display_name: string | null): Promise<Person> =>
+    (await api.patch<Person>(`/people/${personId}`, { display_name })).data,
+  hide: async (personId: string, is_hidden: boolean): Promise<Person> =>
+    (await api.patch<Person>(`/people/${personId}`, { is_hidden })).data,
+  merge: async (sourceId: string, targetId: string): Promise<void> => {
+    await api.post("/people/merge", { source_id: sourceId, target_id: targetId });
+  },
+  recluster: async (reset = true): Promise<{ faces_processed: number; faces_assigned: number; people_created: number }> =>
+    (await api.post(`/people/recluster?reset=${reset}`)).data,
+};
+
+export const facesApi = {
+  unassigned: async (limit = 100, offset = 0, min_score = 0.5): Promise<Face[]> =>
+    (await api.get<Face[]>("/faces/unassigned", { params: { limit, offset, min_score } })).data,
+  reassign: async (faceId: string, person_id: string | null): Promise<void> => {
+    await api.patch(`/faces/${faceId}`, { person_id });
+  },
+  promote: async (faceId: string, display_name?: string): Promise<{ person_id: string }> =>
+    (await api.post(`/faces/${faceId}/promote`, { display_name: display_name ?? null })).data,
+};

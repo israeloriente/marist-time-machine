@@ -16,6 +16,7 @@ const auth = useAuthStore();
       <nav v-if="auth.session">
         <RouterLink to="/capture">Buscar</RouterLink>
         <RouterLink to="/upload">Adicionar</RouterLink>
+        <RouterLink to="/admin">Admin</RouterLink>
         <button class="link" @click="auth.signOut">Sair</button>
       </nav>
     </header>
