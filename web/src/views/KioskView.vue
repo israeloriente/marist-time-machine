@@ -688,7 +688,7 @@ onBeforeUnmount(() => {
 
         <div v-if="result?.photos.length" class="results-grid">
           <button
-            v-for="(p, idx) in result.photos.slice(0, 30)"
+            v-for="(p, idx) in result.photos"
             :key="p.photo_id"
             type="button"
             class="result-tile"
