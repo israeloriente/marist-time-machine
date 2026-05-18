@@ -201,7 +201,7 @@ onMounted(load);
 .tabs {
   display: flex;
   gap: 0.25rem;
-  border-bottom: 1px solid #2d4a82;
+  border-bottom: 1px solid var(--border-strong);
   margin: 1rem 0;
   overflow-x: auto;
 }
@@ -223,7 +223,7 @@ onMounted(load);
   border-bottom-color: var(--accent);
 }
 .tabs .badge {
-  background: rgba(255,211,78,0.15);
+  background: rgba(247, 201, 72, 0.18);
   border-radius: 10px;
   padding: 0.1rem 0.5rem;
   font-size: 0.75rem;
@@ -241,15 +241,15 @@ onMounted(load);
   align-items: center;
   gap: 0.4rem;
   padding: 0.7rem;
-  background: rgba(11, 31, 58, 0.4);
-  border: 1px solid #1d3258;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 10px;
   text-align: center;
 }
 .thumb-placeholder {
   width: 100px; height: 100px;
   border-radius: 8px;
-  background: #1a2c4e;
+  background: var(--surface-strong);
   display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 1.8rem;
 }

@@ -22,8 +22,8 @@ async function draw() {
   const ctx = canvas.value.getContext("2d");
   if (!ctx) return;
 
-  // background placeholder
-  ctx.fillStyle = "#1a2c4e";
+  // background placeholder (matches --surface-strong)
+  ctx.fillStyle = "#ebf3fb";
   ctx.fillRect(0, 0, outPx, outPx);
 
   try {
@@ -66,7 +66,7 @@ watch(() => [props.src, JSON.stringify(props.bbox), props.size], draw);
 <style scoped>
 .face-thumb {
   border-radius: 8px;
-  background: #1a2c4e;
+  background: var(--surface-strong);
   display: block;
   flex-shrink: 0;
 }

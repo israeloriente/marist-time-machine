@@ -1,12 +1,33 @@
 :root {
-  --bg: #0b1f3a;
-  --surface: #122a4d;
-  --accent: #ffd34e;
-  --text: #f5f7fb;
-  --muted: #aab6cf;
-  --error: #ff6b6b;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  color-scheme: dark;
+  /* Marista Pio X palette */
+  --marista-navy:      #0c2c4f;   /* topbar / footers */
+  --marista-blue:      #0e6dc2;   /* hero / primary surfaces */
+  --marista-blue-soft: #5cbdf7;   /* hover / outline */
+  --marista-yellow:    #f7c948;   /* CTAs */
+  --marista-yellow-deep: #e8b224; /* hover do CTA */
+  --marista-pink:      #e85a8b;   /* accents pontuais */
+  --marista-white:     #ffffff;
+  --marista-cream:     #f5f7fb;   /* fundo branco quente */
+
+  /* Semantic tokens */
+  --bg: var(--marista-cream);
+  --surface: #ffffff;
+  --surface-strong: #ebf3fb;
+  --header-bg: var(--marista-navy);
+  --header-text: var(--marista-white);
+  --hero-bg: var(--marista-blue);
+  --text: #14253b;
+  --text-on-dark: var(--marista-white);
+  --muted: #5b6a85;
+  --muted-on-dark: #c7d6ec;
+  --accent: var(--marista-yellow);
+  --accent-deep: var(--marista-yellow-deep);
+  --error: #d63a3a;
+  --border: #d8e2f0;
+  --border-strong: #b9c8db;
+
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  color-scheme: light;
   /* Respect iOS safe areas */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -39,8 +60,9 @@ html, body, #app {
   justify-content: space-between;
   gap: 0.5rem;
   padding: calc(0.7rem + var(--safe-top)) 1rem 0.7rem;
-  background: linear-gradient(180deg, #08172c 0%, var(--bg) 100%);
-  border-bottom: 1px solid #1d3258;
+  background: var(--header-bg);
+  color: var(--header-text);
+  border-bottom: 3px solid var(--marista-yellow);
   position: sticky;
   top: 0;
   z-index: 10;
@@ -52,11 +74,10 @@ html, body, #app {
   gap: 0.5rem;
   font-weight: 700;
   letter-spacing: 0.02em;
-  color: var(--text);
+  color: var(--header-text);
   text-decoration: none;
   font-size: 0.95rem;
   min-width: 0;
-  /* truncate the project name on tiny screens */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -65,7 +86,7 @@ html, body, #app {
   width: 10px;
   height: 10px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--marista-yellow);
   flex-shrink: 0;
 }
 .brand-full { display: none; }
@@ -82,16 +103,19 @@ nav {
   flex-shrink: 0;
 }
 nav a {
-  color: var(--muted);
+  color: var(--muted-on-dark);
   text-decoration: none;
   font-size: 0.9rem;
   padding: 0.4rem 0.2rem;
+  font-weight: 500;
 }
-nav a.router-link-active { color: var(--accent); }
+nav a.router-link-active {
+  color: var(--marista-yellow);
+}
 nav .link {
   background: none;
   border: none;
-  color: var(--muted);
+  color: var(--muted-on-dark);
   cursor: pointer;
   font: inherit;
   padding: 0.4rem 0.2rem;
@@ -109,11 +133,13 @@ main {
 
 .card {
   background: var(--surface);
+  color: var(--text);
   border-radius: 14px;
   padding: 1rem;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 4px 16px rgba(12, 44, 79, 0.08);
+  border: 1px solid var(--border);
 }
-h1, h2 { margin-top: 0; }
+h1, h2, h3 { margin-top: 0; color: var(--marista-navy); }
 
 /* ----- Buttons ----- */
 .button {
@@ -121,42 +147,53 @@ h1, h2 { margin-top: 0; }
   align-items: center;
   justify-content: center;
   gap: 0.5rem;
-  background: var(--accent);
-  color: #0b1f3a;
+  background: var(--marista-yellow);
+  color: var(--marista-navy);
   font-weight: 700;
   border: none;
   border-radius: 999px;
   padding: 0.85rem 1.25rem;
   cursor: pointer;
   font-size: 0.95rem;
-  /* Recommended touch target ≥44px */
   min-height: 44px;
+  transition: background-color 0.15s, transform 0.05s;
 }
+.button:hover:not(:disabled) { background: var(--accent-deep); }
+.button:active:not(:disabled) { transform: scale(0.98); }
 .button:disabled { opacity: 0.5; cursor: not-allowed; }
 .button.secondary {
   background: transparent;
-  color: var(--text);
-  border: 1px solid #2d4a82;
+  color: var(--marista-navy);
+  border: 1px solid var(--border-strong);
 }
+.button.secondary:hover:not(:disabled) {
+  background: var(--surface-strong);
+}
+.button.primary-blue {
+  background: var(--marista-blue);
+  color: var(--marista-white);
+}
+.button.primary-blue:hover:not(:disabled) { background: #0a5aa3; }
 
 /* ----- Inputs ----- */
 .input {
   width: 100%;
-  background: #0b1f3a;
-  border: 1px solid #2d4a82;
+  background: var(--marista-white);
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
   color: var(--text);
   padding: 0.75rem 0.9rem;
   font-size: 1rem;
   min-height: 44px;
-  /* iOS Safari kills auto-zoom only when font-size ≥ 16px */
   -webkit-appearance: none;
   appearance: none;
 }
 .input:focus {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--marista-blue);
   outline-offset: -1px;
+  border-color: var(--marista-blue);
 }
+.input::placeholder { color: var(--muted); }
 
 .muted { color: var(--muted); }
 .error { color: var(--error); }
@@ -173,8 +210,21 @@ h1, h2 { margin-top: 0; }
   aspect-ratio: 1 / 1;
   object-fit: cover;
   border-radius: 10px;
-  background: #1a2c4e;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
 }
+
+/* ----- Hero (institutional blue background) ----- */
+.hero {
+  background: var(--hero-bg);
+  color: var(--text-on-dark);
+  border-radius: 20px;
+  padding: 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+.hero h1, .hero h2 { color: var(--text-on-dark); }
+.hero .muted { color: var(--muted-on-dark); }
 
 /* ----- Tablet+ ----- */
 @media (min-width: 640px) {

@@ -331,17 +331,18 @@ function cancelAll() {
 }
 
 .dropzone {
-  border: 2px dashed #2d4a82;
+  border: 2px dashed var(--border-strong);
   border-radius: 12px;
   padding: 1.5rem 1rem;
   text-align: center;
   cursor: pointer;
   transition: background 0.2s, border-color 0.2s;
-  background: rgba(45, 74, 130, 0.08);
+  background: var(--surface-strong);
+  color: var(--text);
 }
 .dropzone:hover, .dropzone.over {
-  border-color: var(--accent);
-  background: rgba(255, 211, 78, 0.08);
+  border-color: var(--marista-blue);
+  background: rgba(14, 109, 194, 0.06);
 }
 .dropzone-inner {
   display: flex;
@@ -359,13 +360,13 @@ function cancelAll() {
 }
 .overall-bar {
   height: 6px;
-  background: rgba(45, 74, 130, 0.4);
+  background: var(--surface-strong);
   border-radius: 99px;
   overflow: hidden;
 }
 .overall-fill {
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), #ffb84e);
+  background: linear-gradient(90deg, var(--marista-blue), var(--marista-blue-soft));
   transition: width 0.3s ease;
 }
 .overall-meta {
@@ -390,8 +391,8 @@ function cancelAll() {
   gap: 0.75rem;
   padding: 0.6rem;
   border-radius: 10px;
-  background: rgba(11, 31, 58, 0.4);
-  border: 1px solid #1d3258;
+  background: var(--surface);
+  border: 1px solid var(--border);
 }
 .thumb {
   position: relative;
@@ -399,7 +400,7 @@ function cancelAll() {
   height: 64px;
   border-radius: 8px;
   overflow: hidden;
-  background: #1a2c4e;
+  background: var(--surface-strong);
   flex-shrink: 0;
 }
 .thumb img, .thumb video {
@@ -407,7 +408,7 @@ function cancelAll() {
 }
 .thumb .badge {
   position: absolute; bottom: 2px; right: 2px;
-  background: rgba(0,0,0,0.75); color: var(--accent);
+  background: var(--marista-navy); color: var(--marista-yellow);
   font-size: 0.6rem; padding: 1px 5px; border-radius: 4px;
   font-weight: 700; letter-spacing: 0.02em;
 }
@@ -425,7 +426,7 @@ function cancelAll() {
 }
 .bar {
   height: 4px;
-  background: rgba(45,74,130,0.4);
+  background: var(--surface-strong);
   border-radius: 99px;
   overflow: hidden;
   margin-top: 0.15rem;
@@ -458,7 +459,7 @@ function cancelAll() {
   font-size: 1rem; padding: 4px 8px;
   border-radius: 6px;
 }
-.remove:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+.remove:hover { background: var(--surface-strong); color: var(--text); }
 
 .actions {
   position: sticky;

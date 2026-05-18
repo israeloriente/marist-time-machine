@@ -94,7 +94,7 @@ onBeforeUnmount(stopCamera);
 
     <div v-if="error" class="error" style="margin-top: 0.75rem">{{ error }}</div>
 
-    <div style="margin-top: 1rem; aspect-ratio: 4/3; background: #0b1f3a; border-radius: 12px; overflow: hidden">
+    <div style="margin-top: 1rem; aspect-ratio: 4/3; background: var(--marista-navy); border-radius: 12px; overflow: hidden">
       <video ref="videoRef" playsinline muted style="width: 100%; height: 100%; object-fit: cover" />
     </div>
 

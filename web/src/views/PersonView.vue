@@ -266,15 +266,15 @@ onMounted(load);
 }
 .photos-grid img {
   width: 100%; aspect-ratio: 1/1; object-fit: cover;
-  border-radius: 8px; background: #1a2c4e;
+  border-radius: 8px; background: var(--surface-strong);
 }
 .small { font-size: 0.85rem; }
 
 .suggestions {
   margin-top: 1.25rem;
   padding: 0.75rem;
-  background: rgba(255, 211, 78, 0.08);
-  border: 1px solid rgba(255, 211, 78, 0.3);
+  background: rgba(247, 201, 72, 0.10);
+  border: 1px solid rgba(247, 201, 72, 0.35);
   border-radius: 10px;
 }
 .suggestions h3 { margin: 0 0 0.5rem; font-size: 1rem; }
@@ -285,7 +285,7 @@ onMounted(load);
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.5rem 0.75rem;
-  background: rgba(11,31,58,0.5);
+  background: var(--surface-strong);
   border-radius: 8px;
   flex-wrap: wrap;
 }

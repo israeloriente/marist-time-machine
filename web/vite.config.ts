@@ -13,8 +13,8 @@ export default defineConfig({
         name: "Marist Time Machine",
         short_name: "Time Machine",
         description: "Encontre suas fotos do acervo Marista com uma selfie.",
-        theme_color: "#0b1f3a",
-        background_color: "#0b1f3a",
+        theme_color: "#0c2c4f",
+        background_color: "#0c2c4f",
         display: "standalone",
         start_url: "/",
         icons: [

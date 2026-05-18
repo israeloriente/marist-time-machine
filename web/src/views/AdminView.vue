@@ -400,7 +400,7 @@ function switchTab(t: Tab) {
   flex-wrap: wrap;
   gap: 1rem 1.5rem;
   padding: 0.75rem;
-  background: rgba(11, 31, 58, 0.5);
+  background: var(--surface-strong);
   border-radius: 10px;
   margin-bottom: 1rem;
 }
@@ -410,7 +410,7 @@ function switchTab(t: Tab) {
 .tabs {
   display: flex;
   gap: 0.25rem;
-  border-bottom: 1px solid #2d4a82;
+  border-bottom: 1px solid var(--border-strong);
   margin-bottom: 1rem;
   overflow-x: auto;
 }
@@ -440,8 +440,8 @@ function switchTab(t: Tab) {
   align-items: center;
   gap: 0.5rem;
   padding: 0.6rem;
-  background: rgba(11, 31, 58, 0.4);
-  border: 1px solid #1d3258;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 10px;
   text-decoration: none;
   color: var(--text);
@@ -468,7 +468,7 @@ function switchTab(t: Tab) {
 .thumb-placeholder {
   width: 80px; height: 80px;
   border-radius: 8px;
-  background: #1a2c4e;
+  background: var(--surface-strong);
   display: flex; align-items: center; justify-content: center;
   color: var(--muted); font-size: 1.5rem;
 }
@@ -484,8 +484,8 @@ function switchTab(t: Tab) {
   align-items: center;
   gap: 0.4rem;
   padding: 0.6rem;
-  background: rgba(11, 31, 58, 0.4);
-  border: 1px solid #1d3258;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
 .face-actions { display: flex; gap: 0.25rem; }
@@ -506,8 +506,8 @@ function switchTab(t: Tab) {
 }
 .sugg-card {
   padding: 0.75rem;
-  background: rgba(11,31,58,0.4);
-  border: 1px solid #1d3258;
+  background: var(--surface);
+  border: 1px solid var(--border);
   border-radius: 10px;
 }
 .sugg-card-head {
@@ -515,7 +515,7 @@ function switchTab(t: Tab) {
   align-items: center;
   gap: 0.75rem;
   padding-bottom: 0.6rem;
-  border-bottom: 1px solid #1d3258;
+  border-bottom: 1px solid var(--border);
 }
 .sugg-card-info {
   display: flex;
@@ -540,8 +540,8 @@ function switchTab(t: Tab) {
   justify-content: space-between;
   gap: 0.5rem;
   padding: 0.45rem 0.6rem;
-  background: rgba(255, 211, 78, 0.06);
-  border: 1px solid rgba(255, 211, 78, 0.18);
+  background: rgba(247, 201, 72, 0.08);
+  border: 1px solid rgba(247, 201, 72, 0.22);
   border-radius: 8px;
   flex-wrap: wrap;
 }
