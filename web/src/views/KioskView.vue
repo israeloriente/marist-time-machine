@@ -10,10 +10,17 @@ import {
   type Song,
 } from "@/services/api";
 
-type Phase = "idle" | "loading-camera" | "ready" | "running" | "results";
+type Phase = "idle" | "loading-camera" | "ready" | "running" | "reveal" | "results";
 
 const phase = ref<Phase>("idle");
 const error = ref<string | null>(null);
+
+// Reveal phase: drip photos one at a time
+const revealIdx = ref(0);
+const revealComplete = ref(false);
+let revealTimer: number | null = null;
+const PHOTO_REVEAL_MS = 4000;       // how long each photo stays on screen
+const MAX_REVEAL_PHOTOS = 12;       // cap reveal duration; rest goes to grid
 
 const currentYear = new Date().getFullYear();
 const years = Array.from({ length: 60 }, (_, i) => currentYear - i);
@@ -191,17 +198,74 @@ async function startJourney() {
   // 4) Make sure the search is done before transitioning.
   const res = searchP ? await searchP : ({ person_id: null, matched_faces: 0, photos: [] } as SearchResponse);
   result.value = res;
-  phase.value = "results";
 
-  // Keep music playing — it adds to the moment.
+  // Stop the ambient slideshow and camera; music keeps playing.
   stopCamera();
   stopSlideshow();
+
+  // If we found photos, drip them one by one (dramatic reveal).
+  // If we found none, go straight to the "no results" screen.
+  if (res.photos.length) {
+    startReveal();
+  } else {
+    phase.value = "results";
+  }
 }
+
+function startReveal() {
+  phase.value = "reveal";
+  revealIdx.value = 0;
+  revealComplete.value = false;
+
+  const total = Math.min(result.value?.photos.length ?? 0, MAX_REVEAL_PHOTOS);
+  if (revealTimer) window.clearInterval(revealTimer);
+  revealTimer = window.setInterval(() => {
+    if (revealIdx.value >= total - 1) {
+      // Last photo shown — wait one more PHOTO_REVEAL_MS then go to grid.
+      if (revealTimer) window.clearInterval(revealTimer);
+      revealTimer = window.setTimeout(() => {
+        revealComplete.value = true;
+        phase.value = "results";
+      }, PHOTO_REVEAL_MS) as unknown as number;
+      return;
+    }
+    revealIdx.value += 1;
+  }, PHOTO_REVEAL_MS);
+}
+
+function skipReveal() {
+  if (revealTimer) {
+    window.clearInterval(revealTimer);
+    window.clearTimeout(revealTimer);
+    revealTimer = null;
+  }
+  revealComplete.value = true;
+  phase.value = "results";
+}
+
+function stopReveal() {
+  if (revealTimer) {
+    window.clearInterval(revealTimer);
+    window.clearTimeout(revealTimer);
+    revealTimer = null;
+  }
+  revealIdx.value = 0;
+  revealComplete.value = false;
+}
+
+const currentRevealPhoto = computed(() => {
+  if (!result.value) return null;
+  return result.value.photos[revealIdx.value] || null;
+});
+
+// Expose to template
+const _maxReveal = MAX_REVEAL_PHOTOS;
 
 function reset() {
   stopMusic();
   stopCamera();
   stopSlideshow();
+  stopReveal();
   result.value = null;
   photos.value = [];
   songs.value = [];
@@ -247,6 +311,7 @@ onBeforeUnmount(() => {
   stopCamera();
   stopMusic();
   stopSlideshow();
+  stopReveal();
 });
 </script>
 
@@ -271,7 +336,7 @@ onBeforeUnmount(() => {
       <section v-if="phase === 'idle' || phase === 'loading-camera' || phase === 'ready'" class="hero">
         <div class="hero-content">
           <span class="kicker">Colégio Marista Pio X</span>
-          <h1>Você se lembra?</h1>
+          <h1>Um pedaço de você<br />estará sempre aqui</h1>
           <p class="lead">
             Volte no tempo e reviva momentos do colégio. <br />
             Escolha o ano em que você se formou.
@@ -333,6 +398,36 @@ onBeforeUnmount(() => {
             </div>
             <p class="muted">Turma {{ selectedYear }}</p>
           </div>
+        </div>
+      </section>
+    </transition>
+
+    <!-- REVEAL: drip photos one by one full-screen -->
+    <transition name="fade">
+      <section
+        v-if="phase === 'reveal'"
+        class="reveal"
+        @click="skipReveal"
+      >
+        <transition-group name="reveal-cross" tag="div" class="reveal-stack">
+          <img
+            v-if="currentRevealPhoto"
+            :key="currentRevealPhoto.photo_id"
+            :src="currentRevealPhoto.thumb_signed_url || currentRevealPhoto.signed_url"
+            class="reveal-img ken-burns-slow"
+            alt=""
+          />
+        </transition-group>
+
+        <div class="reveal-overlay">
+          <div class="reveal-top">
+            <span class="kicker">Aqui está você</span>
+            <h2 v-if="revealIdx === 0">Encontramos suas memórias</h2>
+            <p class="reveal-counter">
+              {{ revealIdx + 1 }} de {{ Math.min(result?.photos.length ?? 0, _maxReveal) }}
+            </p>
+          </div>
+          <p class="reveal-hint muted">toque para ver todas →</p>
         </div>
       </section>
     </transition>
@@ -594,6 +689,80 @@ onBeforeUnmount(() => {
   transition: opacity 1.2s ease-in-out;
 }
 .cross-enter-from, .cross-leave-to { opacity: 0; }
+
+/* ----- REVEAL (foto-a-foto) ----- */
+.reveal {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: #000;
+  cursor: pointer;
+}
+.reveal-stack { position: absolute; inset: 0; }
+.reveal-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ken-burns-slow {
+  animation: kenburns-slow 4.5s ease-out forwards;
+}
+@keyframes kenburns-slow {
+  from { transform: scale(1.0); }
+  to   { transform: scale(1.18); }
+}
+
+.reveal-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  pointer-events: none;
+  padding: 5vh 4vw;
+  background: linear-gradient(
+    180deg,
+    rgba(12, 44, 79, 0.65) 0%,
+    rgba(12, 44, 79, 0.15) 25%,
+    rgba(12, 44, 79, 0.15) 75%,
+    rgba(12, 44, 79, 0.75) 100%
+  );
+}
+.reveal-top {
+  text-align: center;
+}
+.reveal-top h2 {
+  color: var(--marista-white);
+  font-size: clamp(1.5rem, 4vw, 2.8rem);
+  margin: 0.8rem 0 0.6rem;
+  text-shadow: 0 2px 16px rgba(0, 0, 0, 0.6);
+}
+.reveal-counter {
+  display: inline-block;
+  background: rgba(0, 0, 0, 0.5);
+  color: var(--marista-yellow);
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  font-size: 0.95rem;
+}
+.reveal-hint {
+  text-align: center;
+  color: rgba(255, 255, 255, 0.75);
+  text-shadow: 0 1px 6px rgba(0, 0, 0, 0.6);
+}
+
+/* Crossfade between photos in the reveal */
+.reveal-cross-enter-active,
+.reveal-cross-leave-active {
+  transition: opacity 1s ease-in-out;
+}
+.reveal-cross-enter-from,
+.reveal-cross-leave-to { opacity: 0; }
 
 /* ----- RESULTS ----- */
 .results {
