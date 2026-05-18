@@ -73,7 +73,13 @@ async function loadUnassigned(reset = false) {
 }
 
 async function runRecluster() {
-  if (!confirm("Re-rodar agrupamento agora? Isso reescreve todas as pessoas e leva alguns minutos.")) return;
+  if (
+    !confirm(
+      "Reagrupar agora?\n\nPessoas com nome serão preservadas (junto com seus rostos).\n" +
+        "Pessoas sem nome serão refeitas a partir dos rostos não atribuídos.",
+    )
+  )
+    return;
   reclusterBusy.value = true;
   try {
     const res = await peopleApi.recluster(true);

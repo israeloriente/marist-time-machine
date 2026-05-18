@@ -76,18 +76,33 @@ async def assign_face_to_person(face_id: UUID, embedding: list[float]) -> UUID |
 async def recluster_all(reset: bool = True) -> dict:
     """Re-run DBSCAN over every face. Mirrors Immich's nightly recluster job.
 
-    If `reset=True`, clears all person assignments first and starts fresh —
-    useful when accumulated faces couldn't form clusters during streaming
-    ingestion but now have enough neighbors.
+    Named people (those with display_name set) are **preserved**: their
+    person row and all their face assignments survive the recluster. Only
+    anonymous people get wiped and their faces re-clustered from scratch.
+
+    If `reset=False`, just clusters whatever is currently unassigned (used
+    by streaming ingest).
 
     Returns counts of faces processed, faces newly assigned, people created.
     """
     cfg = settings()
 
     if reset:
-        await db.execute("update public.faces set person_id = null")
-        await db.execute("delete from public.people")
-        logger.info("recluster: cleared all person assignments")
+        # Detach faces from anonymous people, then delete those anonymous people.
+        # Named people (and their face assignments) stay intact.
+        await db.execute(
+            """
+            update public.faces f
+               set person_id = null
+              from public.people p
+             where f.person_id = p.id
+               and p.display_name is null
+            """,
+        )
+        await db.execute(
+            "delete from public.people where display_name is null",
+        )
+        logger.info("recluster: cleared anonymous people + their assignments")
 
     # Process faces in descending detection_score order (best detections first
     # are more likely to become reliable cluster cores).
