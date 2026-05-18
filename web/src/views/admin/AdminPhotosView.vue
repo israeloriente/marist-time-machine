@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import MediaPreview from "@/components/MediaPreview.vue";
 import {
   moderationApi,
@@ -8,13 +9,152 @@ import {
 } from "@/services/api";
 
 type Status = "pending" | "approved" | "rejected";
+type ConfirmAction =
+  | { kind: "approve"; ids: string[]; note?: string }
+  | { kind: "reject"; ids: string[]; note?: string }
+  | { kind: "delete"; ids: string[] };
 
 const status = ref<Status>("pending");
 const items = ref<PhotoModerationItem[]>([]);
 const counts = ref<ModerationCounts>({ pending: 0, approved: 0, rejected: 0 });
 const loading = ref(true);
-const busyId = ref<string | null>(null);
+const busy = ref(false);
 const lightboxIdx = ref<number | null>(null);
+
+// Selection
+const selected = ref<Set<string>>(new Set());
+function toggleSelected(id: string) {
+  const s = new Set(selected.value);
+  if (s.has(id)) s.delete(id);
+  else s.add(id);
+  selected.value = s;
+}
+const allSelectedOnPage = computed(
+  () => items.value.length > 0 && items.value.every((i) => selected.value.has(i.id)),
+);
+function selectAllPage() {
+  const s = new Set(selected.value);
+  for (const i of items.value) s.add(i.id);
+  selected.value = s;
+}
+function clearSelection() {
+  selected.value = new Set();
+}
+
+// Confirm dialog state
+const confirmOpen = ref(false);
+const confirmAction = ref<ConfirmAction | null>(null);
+const confirmConfig = computed(() => {
+  const a = confirmAction.value;
+  if (!a) return null;
+  const count = a.ids.length;
+  if (a.kind === "approve") {
+    return {
+      title: count === 1 ? "Aprovar foto?" : `Aprovar ${count} fotos?`,
+      message:
+        count === 1
+          ? "Essa foto vai ficar disponível em buscas, kiosk e moderação por nome."
+          : `Essas ${count} fotos vão ficar disponíveis em buscas, kiosk e moderação por nome.`,
+      variant: "default" as const,
+      confirmLabel: count === 1 ? "Aprovar" : `Aprovar ${count}`,
+      typeToConfirm: "",
+      details: [] as string[],
+    };
+  }
+  if (a.kind === "reject") {
+    return {
+      title: count === 1 ? "Rejeitar foto?" : `Rejeitar ${count} fotos?`,
+      message:
+        count === 1
+          ? "A foto será escondida de buscas/kiosk. Pode ser reaprovada depois."
+          : `${count} fotos serão escondidas de buscas/kiosk. Podem ser reaprovadas depois.`,
+      variant: "default" as const,
+      confirmLabel: count === 1 ? "Rejeitar" : `Rejeitar ${count}`,
+      typeToConfirm: "",
+      details: [] as string[],
+    };
+  }
+  // delete
+  const facesTotal = items.value
+    .filter((i) => a.ids.includes(i.id))
+    .reduce((s, i) => s + i.face_count, 0);
+  return {
+    title:
+      count === 1 ? "Apagar foto definitivamente?" : `Apagar ${count} fotos definitivamente?`,
+    message: "",
+    variant: "danger" as const,
+    confirmLabel: count === 1 ? "Apagar" : `Apagar ${count}`,
+    typeToConfirm: "APAGAR",
+    details: [
+      `Remove ${count === 1 ? "a foto" : "as fotos"} do banco e do storage Hetzner.`,
+      `${facesTotal} ${facesTotal === 1 ? "rosto detectado" : "rostos detectados"} também ${
+        facesTotal === 1 ? "será apagado" : "serão apagados"
+      }.`,
+      "Esta ação não pode ser desfeita.",
+    ],
+  };
+});
+
+function openConfirm(a: ConfirmAction) {
+  confirmAction.value = a;
+  confirmOpen.value = true;
+}
+function closeConfirm() {
+  if (busy.value) return;
+  confirmOpen.value = false;
+  confirmAction.value = null;
+}
+
+async function runConfirm() {
+  const a = confirmAction.value;
+  if (!a) return;
+  busy.value = true;
+  try {
+    if (a.kind === "approve") {
+      if (a.ids.length === 1) await moderationApi.approve(a.ids[0], a.note);
+      else await moderationApi.bulkApprove(a.ids, a.note);
+    } else if (a.kind === "reject") {
+      if (a.ids.length === 1) await moderationApi.reject(a.ids[0], a.note);
+      else await moderationApi.bulkReject(a.ids, a.note);
+    } else {
+      // delete
+      if (a.ids.length === 1) await moderationApi.deleteForever(a.ids[0]);
+      else await moderationApi.bulkDelete(a.ids);
+    }
+    items.value = items.value.filter((i) => !a.ids.includes(i.id));
+    selected.value = new Set();
+    await loadCounts();
+    confirmOpen.value = false;
+    confirmAction.value = null;
+  } catch (e: any) {
+    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } finally {
+    busy.value = false;
+  }
+}
+
+// ----- Actions -----
+
+function approveOne(item: PhotoModerationItem) {
+  openConfirm({ kind: "approve", ids: [item.id] });
+}
+function rejectOne(item: PhotoModerationItem) {
+  openConfirm({ kind: "reject", ids: [item.id] });
+}
+function deleteOne(item: PhotoModerationItem) {
+  openConfirm({ kind: "delete", ids: [item.id] });
+}
+function bulkApprove() {
+  openConfirm({ kind: "approve", ids: Array.from(selected.value) });
+}
+function bulkReject() {
+  openConfirm({ kind: "reject", ids: Array.from(selected.value) });
+}
+function bulkDelete() {
+  openConfirm({ kind: "delete", ids: Array.from(selected.value) });
+}
+
+// ----- Loading -----
 
 async function loadCounts() {
   try {
@@ -23,9 +163,9 @@ async function loadCounts() {
     /* silent */
   }
 }
-
 async function load() {
   loading.value = true;
+  selected.value = new Set();
   try {
     items.value = await moderationApi.list(status.value, 100, 0);
   } finally {
@@ -33,68 +173,8 @@ async function load() {
   }
 }
 
-async function approve(item: PhotoModerationItem) {
-  busyId.value = item.id;
-  try {
-    await moderationApi.approve(item.id);
-    items.value = items.value.filter((p) => p.id !== item.id);
-    await loadCounts();
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
-  } finally {
-    busyId.value = null;
-  }
-}
-
-async function reject(item: PhotoModerationItem) {
-  const note = prompt("Motivo da rejeição (opcional):") ?? "";
-  busyId.value = item.id;
-  try {
-    await moderationApi.reject(item.id, note.trim() || undefined);
-    items.value = items.value.filter((p) => p.id !== item.id);
-    await loadCounts();
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
-  } finally {
-    busyId.value = null;
-  }
-}
-
-async function deleteForever(item: PhotoModerationItem) {
-  const name =
-    (item.metadata.original_filename as string) || item.id.slice(0, 8);
-  const yes = confirm(
-    `Apagar "${name}" PERMANENTEMENTE?\n\n` +
-      `Isso remove a foto do banco E do storage Hetzner. ` +
-      `Os ${item.face_count} rostos detectados nela também serão apagados.\n\n` +
-      `Esta ação NÃO pode ser desfeita.`,
-  );
-  if (!yes) return;
-
-  // Second confirmation — type-to-confirm pra coisa irreversível
-  const typed = prompt('Digite "APAGAR" pra confirmar:');
-  if (typed?.trim().toUpperCase() !== "APAGAR") return;
-
-  busyId.value = item.id;
-  try {
-    const result = await moderationApi.deleteForever(item.id);
-    items.value = items.value.filter((p) => p.id !== item.id);
-    await loadCounts();
-    alert(
-      `Apagado.\n` +
-        `${result.faces_removed} ${result.faces_removed === 1 ? "rosto" : "rostos"} removidos do banco.\n` +
-        `${result.objects_removed.length} ${result.objects_removed.length === 1 ? "objeto" : "objetos"} removidos do storage.`,
-    );
-  } catch (e: any) {
-    alert("Erro: " + (e.response?.data?.detail ?? e.message));
-  } finally {
-    busyId.value = null;
-  }
-}
-
 const fmt = (iso: string) =>
   new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
-
 const currentTitle = computed(() => {
   if (status.value === "pending") return "Fotos aguardando aprovação";
   if (status.value === "approved") return "Fotos aprovadas";
@@ -102,7 +182,6 @@ const currentTitle = computed(() => {
 });
 
 watch(status, load);
-
 onMounted(async () => {
   await Promise.all([loadCounts(), load()]);
 });
@@ -132,6 +211,41 @@ onMounted(async () => {
     </button>
   </div>
 
+  <!-- Selection bar -->
+  <div v-if="items.length" class="select-bar">
+    <label class="select-all">
+      <input
+        type="checkbox"
+        :checked="allSelectedOnPage"
+        :indeterminate.prop="selected.size > 0 && !allSelectedOnPage"
+        @change="allSelectedOnPage ? clearSelection() : selectAllPage()"
+      />
+      <span>
+        <template v-if="selected.size === 0">Selecionar todos da página</template>
+        <template v-else>{{ selected.size }} selecionada{{ selected.size === 1 ? "" : "s" }}</template>
+      </span>
+    </label>
+    <div v-if="selected.size > 0" class="bulk-actions">
+      <button v-if="status === 'pending'" class="button small" @click="bulkApprove">
+        ✓ Aprovar
+      </button>
+      <button
+        v-if="status === 'pending' || status === 'approved'"
+        class="button small secondary"
+        @click="bulkReject"
+      >
+        ✕ Rejeitar
+      </button>
+      <button v-if="status === 'rejected'" class="button small" @click="bulkApprove">
+        Reaprovar
+      </button>
+      <button v-if="status === 'rejected'" class="button small danger" @click="bulkDelete">
+        🗑 Apagar definitivamente
+      </button>
+      <button class="button small ghost" @click="clearSelection">Limpar</button>
+    </div>
+  </div>
+
   <h3 class="section-title">{{ currentTitle }}</h3>
 
   <p v-if="loading" class="muted">Carregando…</p>
@@ -141,7 +255,20 @@ onMounted(async () => {
   </p>
 
   <div v-else class="grid">
-    <article v-for="(item, idx) in items" :key="item.id" class="card-item">
+    <article
+      v-for="(item, idx) in items"
+      :key="item.id"
+      class="card-item"
+      :class="{ selected: selected.has(item.id) }"
+    >
+      <label class="card-check" @click.stop>
+        <input
+          type="checkbox"
+          :checked="selected.has(item.id)"
+          @change="toggleSelected(item.id)"
+        />
+      </label>
+
       <button class="thumb-btn" type="button" @click="lightboxIdx = idx">
         <MediaPreview
           :src="item.signed_url"
@@ -159,11 +286,11 @@ onMounted(async () => {
           <span class="muted small">{{ fmt(item.uploaded_at) }}</span>
         </div>
         <div class="meta-row">
-          <span class="tag" v-if="item.uploader_email">{{ item.uploader_email }}</span>
-          <span class="tag" v-if="(item.metadata.graduation_year as number)">
+          <span v-if="item.uploader_email" class="tag">{{ item.uploader_email }}</span>
+          <span v-if="(item.metadata.graduation_year as number)" class="tag">
             {{ item.metadata.graduation_year }}
           </span>
-          <span class="tag" v-if="(item.metadata.class as string)">
+          <span v-if="(item.metadata.class as string)" class="tag">
             Turma {{ item.metadata.class }}
           </span>
           <span class="tag faces">
@@ -179,36 +306,17 @@ onMounted(async () => {
 
         <div class="actions">
           <template v-if="status === 'pending'">
-            <button class="button small" :disabled="busyId === item.id" @click="approve(item)">
-              ✓ Aprovar
-            </button>
-            <button
-              class="button small secondary"
-              :disabled="busyId === item.id"
-              @click="reject(item)"
-            >
-              ✕ Rejeitar
-            </button>
+            <button class="button small" @click="approveOne(item)">✓ Aprovar</button>
+            <button class="button small secondary" @click="rejectOne(item)">✕ Rejeitar</button>
           </template>
           <template v-else-if="status === 'rejected'">
-            <button class="button small" :disabled="busyId === item.id" @click="approve(item)">
-              Reaprovar
-            </button>
-            <button
-              class="button small danger"
-              :disabled="busyId === item.id"
-              :title="`Apaga ${item.face_count} ${item.face_count === 1 ? 'rosto' : 'rostos'} + bytes no Hetzner`"
-              @click="deleteForever(item)"
-            >
-              🗑 Apagar definitivamente
+            <button class="button small" @click="approveOne(item)">Reaprovar</button>
+            <button class="button small danger" @click="deleteOne(item)">
+              🗑 Apagar
             </button>
           </template>
           <template v-else>
-            <button
-              class="button small secondary"
-              :disabled="busyId === item.id"
-              @click="reject(item)"
-            >
+            <button class="button small secondary" @click="rejectOne(item)">
               Remover de público
             </button>
           </template>
@@ -239,6 +347,21 @@ onMounted(async () => {
       </div>
     </div>
   </transition>
+
+  <!-- Confirmation dialog -->
+  <ConfirmDialog
+    v-if="confirmConfig"
+    :open="confirmOpen"
+    :title="confirmConfig.title"
+    :message="confirmConfig.message"
+    :variant="confirmConfig.variant"
+    :confirm-label="confirmConfig.confirmLabel"
+    :type-to-confirm="confirmConfig.typeToConfirm"
+    :details="confirmConfig.details"
+    :busy="busy"
+    @close="closeConfirm"
+    @confirm="runConfirm"
+  />
 </template>
 
 <style scoped>
@@ -250,7 +373,7 @@ onMounted(async () => {
   display: flex;
   gap: 0.25rem;
   border-bottom: 1px solid var(--border);
-  margin-bottom: 1.25rem;
+  margin-bottom: 0.75rem;
   overflow-x: auto;
 }
 .tabs button {
@@ -284,6 +407,37 @@ onMounted(async () => {
   color: #8a6913;
 }
 
+.select-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.85rem;
+  margin: 0 -0.5rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  flex-wrap: wrap;
+}
+.select-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.9rem;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+.select-all input { width: 18px; height: 18px; accent-color: var(--marista-blue); }
+.bulk-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
 .section-title { margin: 0 0 1rem; font-size: 1rem; color: var(--muted); font-weight: 600; }
 
 .grid {
@@ -292,13 +446,40 @@ onMounted(async () => {
   gap: 0.85rem;
 }
 .card-item {
+  position: relative;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 12px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  transition: border-color 0.12s, box-shadow 0.12s;
 }
+.card-item.selected {
+  border-color: var(--marista-blue);
+  box-shadow: 0 0 0 1px var(--marista-blue);
+}
+
+.card-check {
+  position: absolute;
+  top: 0.6rem;
+  left: 0.6rem;
+  z-index: 3;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 6px;
+  padding: 0.25rem;
+  cursor: pointer;
+  display: inline-flex;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+}
+.card-check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--marista-blue);
+  cursor: pointer;
+  margin: 0;
+}
+
 .thumb-btn {
   display: block;
   aspect-ratio: 4 / 3;
@@ -331,11 +512,7 @@ onMounted(async () => {
   white-space: nowrap;
   min-width: 0;
 }
-.meta-row {
-  display: flex;
-  gap: 0.3rem;
-  flex-wrap: wrap;
-}
+.meta-row { display: flex; gap: 0.3rem; flex-wrap: wrap; }
 .tag {
   font-size: 0.7rem;
   font-weight: 700;
@@ -362,13 +539,18 @@ onMounted(async () => {
   font-size: 0.85rem;
 }
 .button.small.danger {
-  background: rgba(214, 58, 58, 0.1);
-  color: var(--error);
-  border: 1px solid rgba(214, 58, 58, 0.4);
+  background: var(--error);
+  color: white;
 }
 .button.small.danger:hover:not(:disabled) {
-  background: rgba(214, 58, 58, 0.18);
+  background: #b32f2f;
 }
+.button.small.ghost {
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+}
+.button.small.ghost:hover { color: var(--text); background: var(--surface-strong); }
 
 /* Lightbox */
 .lightbox {

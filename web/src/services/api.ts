@@ -105,7 +105,24 @@ export const moderationApi = {
     faces_removed: number;
     objects_removed: string[];
   }> => (await api.delete(`/photos/${id}`)).data,
+  bulkApprove: async (photo_ids: string[], note?: string): Promise<BulkResult> =>
+    (await api.post<BulkResult>("/photos/moderation/bulk-approve", {
+      photo_ids, note: note ?? null,
+    })).data,
+  bulkReject: async (photo_ids: string[], note?: string): Promise<BulkResult> =>
+    (await api.post<BulkResult>("/photos/moderation/bulk-reject", {
+      photo_ids, note: note ?? null,
+    })).data,
+  bulkDelete: async (photo_ids: string[]): Promise<BulkResult> =>
+    (await api.post<BulkResult>("/photos/moderation/bulk-delete", {
+      photo_ids,
+    })).data,
 };
+
+export interface BulkResult {
+  succeeded: string[];
+  failed: Array<{ id: string; reason: string }>;
+}
 
 export async function dedupePhotos(): Promise<{
   photos_visited: number;

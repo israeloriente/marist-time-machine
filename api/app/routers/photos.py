@@ -309,6 +309,16 @@ class DeletePhotoResult(BaseModel):
     objects_removed: list[str]
 
 
+class BulkRequest(BaseModel):
+    photo_ids: list[UUID]
+    note: str | None = None
+
+
+class BulkResult(BaseModel):
+    succeeded: list[UUID]
+    failed: list[dict]  # [{id, reason}]
+
+
 @router.delete("/{photo_id}", response_model=DeletePhotoResult)
 async def delete_photo_permanently(
     photo_id: UUID,
@@ -421,6 +431,90 @@ async def _set_moderation(
         moderated_at=row["moderated_at"].isoformat() if row["moderated_at"] else None,
         face_count=row["face_count"],
     )
+
+
+@router.post("/moderation/bulk-approve", response_model=BulkResult)
+async def bulk_approve(body: BulkRequest, user: User = CurrentUser) -> BulkResult:
+    return await _bulk_moderate(body, "approved", user)
+
+
+@router.post("/moderation/bulk-reject", response_model=BulkResult)
+async def bulk_reject(body: BulkRequest, user: User = CurrentUser) -> BulkResult:
+    return await _bulk_moderate(body, "rejected", user)
+
+
+async def _bulk_moderate(body: BulkRequest, status_str: str, user: User) -> BulkResult:
+    if not body.photo_ids:
+        return BulkResult(succeeded=[], failed=[])
+    note = (body.note.strip() if body.note else None) or None
+    await db.execute(
+        """
+        update public.photos
+           set moderation_status = $1,
+               moderation_note   = $2,
+               moderated_at      = now(),
+               moderated_by      = $3
+         where id = any($4::uuid[])
+        """,
+        status_str,
+        note,
+        UUID(user.id),
+        body.photo_ids,
+    )
+    # We don't track per-row failures from a single UPDATE; treat all as ok.
+    return BulkResult(succeeded=body.photo_ids, failed=[])
+
+
+@router.post("/moderation/bulk-delete", response_model=BulkResult)
+async def bulk_delete(body: BulkRequest, _user: User = CurrentUser) -> BulkResult:
+    """Permanently delete a list of REJECTED photos (DB + Hetzner objects)."""
+    if not body.photo_ids:
+        return BulkResult(succeeded=[], failed=[])
+
+    rows = await db.fetch(
+        """
+        select id, storage_bucket, storage_path, metadata, moderation_status
+        from public.photos
+        where id = any($1::uuid[])
+        """,
+        body.photo_ids,
+    )
+
+    succeeded: list[UUID] = []
+    failed: list[dict] = []
+
+    # Group bucket deletes for fewer round-trips
+    deletes_by_bucket: dict[str, list[str]] = {}
+    to_delete_ids: list[UUID] = []
+
+    for r in rows:
+        if r["moderation_status"] != "rejected":
+            failed.append({"id": str(r["id"]), "reason": "não está rejeitada"})
+            continue
+        deletes_by_bucket.setdefault(r["storage_bucket"], []).append(r["storage_path"])
+        meta = storage.coerce_metadata(r["metadata"])
+        tb, tp = meta.get("thumb_bucket"), meta.get("thumb_path")
+        if tb and tp:
+            deletes_by_bucket.setdefault(tb, []).append(tp)
+        to_delete_ids.append(r["id"])
+        succeeded.append(r["id"])
+
+    for bucket, paths in deletes_by_bucket.items():
+        storage.remove(bucket, paths)
+
+    if to_delete_ids:
+        await db.execute(
+            "delete from public.photos where id = any($1::uuid[])",
+            to_delete_ids,
+        )
+
+    # Any ID the caller sent that we didn't find at all
+    found_ids = {r["id"] for r in rows}
+    for pid in body.photo_ids:
+        if pid not in found_ids:
+            failed.append({"id": str(pid), "reason": "não encontrada"})
+
+    return BulkResult(succeeded=succeeded, failed=failed)
 
 
 @router.get("", response_model=list[PhotoOut])
