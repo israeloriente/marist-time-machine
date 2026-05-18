@@ -64,10 +64,12 @@ services:
       # CORS
       CORS_ORIGINS: ${CORS_ORIGINS:-*}
     networks:
-      - default
       - supabase
     expose:
       - "8080"
+    labels:
+      # Tell Traefik which port to forward to (otherwise it guesses).
+      - "traefik.http.services.api-8080.loadbalancer.server.port=8080"
 
   web:
     build:
