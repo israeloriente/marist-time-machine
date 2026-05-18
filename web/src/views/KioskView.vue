@@ -92,8 +92,28 @@ const lightboxList = computed(() => {
 const yearPhotos = ref<RandomPhoto[]>([]);
 const yearPhotosLoading = ref(false);
 
+// "Carregar mais" paging — same page size for both grids.
+const PAGE_SIZE = 30;
+const resultsVisible = ref(PAGE_SIZE);
+const yearVisible = ref(PAGE_SIZE);
+
+const resultsRemaining = computed(() =>
+  Math.max(0, (result.value?.photos.length ?? 0) - resultsVisible.value),
+);
+const yearRemaining = computed(() =>
+  Math.max(0, yearPhotos.value.length - yearVisible.value),
+);
+
+function showMoreResults() {
+  resultsVisible.value += PAGE_SIZE;
+}
+function showMoreYear() {
+  yearVisible.value += PAGE_SIZE;
+}
+
 async function showYearPhotos() {
   phase.value = "year-photos";
+  yearVisible.value = PAGE_SIZE; // reset paging when entering the view
   if (yearPhotos.value.length) return; // already loaded
   yearPhotosLoading.value = true;
   try {
@@ -287,6 +307,7 @@ async function startJourney() {
   phase.value = "running";
   progressStep.value = 0;
   result.value = null;
+  resultsVisible.value = PAGE_SIZE; // reset paging for a fresh search
 
   // 1) Fetch slideshow + songs in parallel (start animation ASAP)
   const photosP = randomPhotos(40, selectedYear.value).catch(() => []);
@@ -734,7 +755,7 @@ onBeforeUnmount(() => {
 
         <div v-if="result?.photos.length" class="results-grid">
           <button
-            v-for="(p, idx) in result.photos"
+            v-for="(p, idx) in result.photos.slice(0, resultsVisible)"
             :key="p.photo_id"
             type="button"
             class="result-tile"
@@ -744,6 +765,16 @@ onBeforeUnmount(() => {
             <span v-if="p.media_type === 'video'" class="video-pill">▶ vídeo</span>
           </button>
         </div>
+
+        <button
+          v-if="resultsRemaining > 0"
+          type="button"
+          class="big-cta secondary load-more"
+          @click="showMoreResults"
+        >
+          Carregar mais
+          <span class="load-more-count">+{{ Math.min(PAGE_SIZE, resultsRemaining) }}</span>
+        </button>
 
         <div class="results-actions">
           <button class="big-cta" type="button" @click="showYearPhotos">
@@ -772,7 +803,7 @@ onBeforeUnmount(() => {
 
         <div v-else-if="yearPhotos.length" class="results-grid">
           <button
-            v-for="(p, idx) in yearPhotos"
+            v-for="(p, idx) in yearPhotos.slice(0, yearVisible)"
             :key="p.id"
             type="button"
             class="result-tile"
@@ -782,7 +813,17 @@ onBeforeUnmount(() => {
           </button>
         </div>
 
-        <p v-else class="muted">Ainda não temos fotos catalogadas dessa turma.</p>
+        <p v-else-if="!yearPhotosLoading" class="muted">Ainda não temos fotos catalogadas dessa turma.</p>
+
+        <button
+          v-if="yearRemaining > 0"
+          type="button"
+          class="big-cta secondary load-more"
+          @click="showMoreYear"
+        >
+          Carregar mais
+          <span class="load-more-count">+{{ Math.min(PAGE_SIZE, yearRemaining) }}</span>
+        </button>
 
         <div class="results-actions">
           <button class="big-cta secondary" type="button" @click="backToResults">
@@ -1355,6 +1396,21 @@ onBeforeUnmount(() => {
   font-size: 0.9rem;
   letter-spacing: 0.04em;
   margin: 0;
+}
+
+.load-more {
+  margin-top: 0.5rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.load-more-count {
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--marista-yellow);
+  padding: 0.15rem 0.65rem;
+  border-radius: 99px;
+  font-size: 0.85rem;
+  font-weight: 700;
 }
 
 .results-actions {
