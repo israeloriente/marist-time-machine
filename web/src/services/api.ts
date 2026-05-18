@@ -219,6 +219,23 @@ export interface TargetWithSuggestions {
   names: NameVote[];
 }
 
+// ---------- Current user profile ----------
+
+export interface UserProfile {
+  user_id: string;
+  graduation_year: number;
+  class_letter: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const meApi = {
+  profile: async (): Promise<UserProfile | null> =>
+    (await api.get<UserProfile | null>("/me/profile")).data,
+  saveProfile: async (graduation_year: number, class_letter: string): Promise<UserProfile> =>
+    (await api.put<UserProfile>("/me/profile", { graduation_year, class_letter })).data,
+};
+
 export const suggestionsApi = {
   create: async (target: { person_id?: string; face_id?: string }, suggested_name: string) =>
     (await api.post("/suggestions", { ...target, suggested_name })).data,

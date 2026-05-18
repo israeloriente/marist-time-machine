@@ -2,9 +2,16 @@
 import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink, RouterView, useRoute } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useProfileStore } from "@/stores/profile";
 import { peopleApi, suggestionsApi, facesApi } from "@/services/api";
 
 const auth = useAuthStore();
+const profileStore = useProfileStore();
+
+async function handleSignOut() {
+  profileStore.clear();
+  await auth.signOut();
+}
 const route = useRoute();
 
 const drawerOpen = ref(false);
@@ -108,7 +115,7 @@ const userInitial = computed(() => userEmail.value.slice(0, 1).toUpperCase());
         </div>
         <div class="actions">
           <RouterLink to="/" class="link-out">← Voltar ao app</RouterLink>
-          <button class="link-out danger" @click="auth.signOut">Sair</button>
+          <button class="link-out danger" @click="handleSignOut">Sair</button>
         </div>
       </div>
     </aside>

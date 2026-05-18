@@ -1,11 +1,24 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { useAuthStore } from "@/stores/auth";
+import { useProfileStore } from "@/stores/profile";
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: "/", name: "home", component: () => import("@/views/HomeView.vue") },
     { path: "/login", name: "login", component: () => import("@/views/LoginView.vue") },
+    {
+      path: "/onboarding",
+      name: "onboarding",
+      component: () => import("@/views/OnboardingView.vue"),
+      meta: { requiresAuth: true, skipProfileCheck: true },
+    },
+    {
+      path: "/perfil",
+      name: "profile",
+      component: () => import("@/views/ProfileView.vue"),
+      meta: { requiresAuth: true },
+    },
     {
       path: "/capture",
       name: "capture",
@@ -81,5 +94,15 @@ router.beforeEach(async (to) => {
   if (!auth.session) await auth.init();
   if (to.meta.requiresAuth && !auth.session) {
     return { name: "login", query: { redirect: to.fullPath } };
+  }
+
+  // Profile gate: authenticated users without a saved profile go to /onboarding.
+  // Routes can opt out via meta.skipProfileCheck (the onboarding page itself).
+  if (auth.session && to.meta.requiresAuth && !to.meta.skipProfileCheck) {
+    const profile = useProfileStore();
+    await profile.load();
+    if (!profile.profile) {
+      return { name: "onboarding", query: { redirect: to.fullPath } };
+    }
   }
 });
