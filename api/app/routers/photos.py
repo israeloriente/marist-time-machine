@@ -302,6 +302,74 @@ async def reject_photo(
     return await _set_moderation(photo_id, "rejected", body, user)
 
 
+class DeletePhotoResult(BaseModel):
+    deleted: bool
+    photo_id: UUID
+    faces_removed: int
+    objects_removed: list[str]
+
+
+@router.delete("/{photo_id}", response_model=DeletePhotoResult)
+async def delete_photo_permanently(
+    photo_id: UUID,
+    require_rejected: bool = True,
+    _user: User = CurrentUser,
+) -> DeletePhotoResult:
+    """Permanently delete a photo: row, faces, and bucket objects.
+
+    By default only rejected photos can be hard-deleted (safety rail).
+    Pass ?require_rejected=false to bypass — useful only for admin scripts.
+    """
+    row = await db.fetchrow(
+        """
+        select id, storage_bucket, storage_path, metadata, moderation_status
+        from public.photos
+        where id = $1
+        """,
+        photo_id,
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="photo not found")
+
+    if require_rejected and row["moderation_status"] != "rejected":
+        raise HTTPException(
+            status_code=409,
+            detail="só fotos rejeitadas podem ser apagadas permanentemente; rejeite primeiro",
+        )
+
+    meta = storage.coerce_metadata(row["metadata"])
+
+    # 1) Count faces that will cascade-delete (FK ON DELETE CASCADE)
+    face_count_row = await db.fetchrow(
+        "select count(*) as n from public.faces where photo_id = $1",
+        photo_id,
+    )
+    faces_removed = int(face_count_row["n"]) if face_count_row else 0
+
+    # 2) Build list of bucket objects to remove
+    removed: list[str] = []
+    main_bucket = row["storage_bucket"]
+    main_path = row["storage_path"]
+    storage.remove(main_bucket, [main_path])
+    removed.append(f"{main_bucket}/{main_path}")
+
+    thumb_bucket = meta.get("thumb_bucket")
+    thumb_path = meta.get("thumb_path")
+    if thumb_bucket and thumb_path:
+        storage.remove(thumb_bucket, [thumb_path])
+        removed.append(f"{thumb_bucket}/{thumb_path}")
+
+    # 3) Delete the DB row (cascades to faces)
+    await db.execute("delete from public.photos where id = $1", photo_id)
+
+    return DeletePhotoResult(
+        deleted=True,
+        photo_id=photo_id,
+        faces_removed=faces_removed,
+        objects_removed=removed,
+    )
+
+
 async def _set_moderation(
     photo_id: UUID, status_str: str, body: ModerationDecision | None, user: User,
 ) -> PhotoModerationOut:

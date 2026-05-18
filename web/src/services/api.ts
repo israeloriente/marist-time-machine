@@ -97,6 +97,14 @@ export const moderationApi = {
     (await api.post<PhotoModerationItem>(`/photos/${id}/approve`, { note: note ?? null })).data,
   reject: async (id: string, note?: string): Promise<PhotoModerationItem> =>
     (await api.post<PhotoModerationItem>(`/photos/${id}/reject`, { note: note ?? null })).data,
+  deleteForever: async (
+    id: string,
+  ): Promise<{
+    deleted: boolean;
+    photo_id: string;
+    faces_removed: number;
+    objects_removed: string[];
+  }> => (await api.delete(`/photos/${id}`)).data,
 };
 
 export async function dedupePhotos(): Promise<{

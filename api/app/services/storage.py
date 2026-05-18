@@ -26,6 +26,22 @@ def download(bucket: str, path: str) -> bytes:
     return storage_client().storage.from_(bucket).download(path)
 
 
+def remove(bucket: str, paths: list[str]) -> None:
+    """Best-effort delete of one or more objects in a bucket.
+
+    Supabase Storage forwards the DELETE to the backing S3 (Hetzner Object
+    Storage in our case), so this also removes the bytes from the bucket.
+    Silently swallows errors per-path (an object might already be missing).
+    """
+    if not paths:
+        return
+    try:
+        storage_client().storage.from_(bucket).remove(paths)
+    except Exception:
+        # Don't block the caller — log via stderr happens at request handler
+        pass
+
+
 def signed_url(bucket: str, path: str, expires_in: int = 3600) -> str:
     """Returns an absolute URL signed for browser access.
 

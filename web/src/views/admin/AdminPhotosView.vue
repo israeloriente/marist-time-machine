@@ -60,6 +60,38 @@ async function reject(item: PhotoModerationItem) {
   }
 }
 
+async function deleteForever(item: PhotoModerationItem) {
+  const name =
+    (item.metadata.original_filename as string) || item.id.slice(0, 8);
+  const yes = confirm(
+    `Apagar "${name}" PERMANENTEMENTE?\n\n` +
+      `Isso remove a foto do banco E do storage Hetzner. ` +
+      `Os ${item.face_count} rostos detectados nela também serão apagados.\n\n` +
+      `Esta ação NÃO pode ser desfeita.`,
+  );
+  if (!yes) return;
+
+  // Second confirmation — type-to-confirm pra coisa irreversível
+  const typed = prompt('Digite "APAGAR" pra confirmar:');
+  if (typed?.trim().toUpperCase() !== "APAGAR") return;
+
+  busyId.value = item.id;
+  try {
+    const result = await moderationApi.deleteForever(item.id);
+    items.value = items.value.filter((p) => p.id !== item.id);
+    await loadCounts();
+    alert(
+      `Apagado.\n` +
+        `${result.faces_removed} ${result.faces_removed === 1 ? "rosto" : "rostos"} removidos do banco.\n` +
+        `${result.objects_removed.length} ${result.objects_removed.length === 1 ? "objeto" : "objetos"} removidos do storage.`,
+    );
+  } catch (e: any) {
+    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } finally {
+    busyId.value = null;
+  }
+}
+
 const fmt = (iso: string) =>
   new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
 
@@ -161,6 +193,14 @@ onMounted(async () => {
           <template v-else-if="status === 'rejected'">
             <button class="button small" :disabled="busyId === item.id" @click="approve(item)">
               Reaprovar
+            </button>
+            <button
+              class="button small danger"
+              :disabled="busyId === item.id"
+              :title="`Apaga ${item.face_count} ${item.face_count === 1 ? 'rosto' : 'rostos'} + bytes no Hetzner`"
+              @click="deleteForever(item)"
+            >
+              🗑 Apagar definitivamente
             </button>
           </template>
           <template v-else>
@@ -320,6 +360,14 @@ onMounted(async () => {
   min-height: 36px;
   padding: 0.3rem 0.85rem;
   font-size: 0.85rem;
+}
+.button.small.danger {
+  background: rgba(214, 58, 58, 0.1);
+  color: var(--error);
+  border: 1px solid rgba(214, 58, 58, 0.4);
+}
+.button.small.danger:hover:not(:disabled) {
+  background: rgba(214, 58, 58, 0.18);
 }
 
 /* Lightbox */
