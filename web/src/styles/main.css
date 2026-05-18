@@ -96,23 +96,25 @@ html, body, #app {
   .brand-short { display: none; }
 }
 
-nav {
+/* Scoped to the public top bar so it doesn't leak into other <nav> elements
+   like the admin sidebar (which needs its own vertical layout). */
+.topbar nav {
   display: flex;
   gap: 0.75rem;
   align-items: center;
   flex-shrink: 0;
 }
-nav a {
+.topbar nav a {
   color: var(--muted-on-dark);
   text-decoration: none;
   font-size: 0.9rem;
   padding: 0.4rem 0.2rem;
   font-weight: 500;
 }
-nav a.router-link-active {
+.topbar nav a.router-link-active {
   color: var(--marista-yellow);
 }
-nav .link {
+.topbar nav .link {
   background: none;
   border: none;
   color: var(--muted-on-dark);
@@ -230,8 +232,8 @@ h1, h2, h3 { margin-top: 0; color: var(--marista-navy); }
 @media (min-width: 640px) {
   .topbar { padding: 1rem 1.5rem; }
   .brand { font-size: 1rem; }
-  nav { gap: 1rem; }
-  nav a, nav .link { font-size: 0.95rem; padding: 0; }
+  .topbar nav { gap: 1rem; }
+  .topbar nav a, .topbar nav .link { font-size: 0.95rem; padding: 0; }
 
   main { padding: 1.5rem; }
   .card { padding: 1.5rem; border-radius: 16px; }

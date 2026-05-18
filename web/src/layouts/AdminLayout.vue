@@ -215,6 +215,10 @@ const userInitial = computed(() => userEmail.value.slice(0, 1).toUpperCase());
   flex: 1;
   overflow-y: auto;
   padding: 0.75rem 0;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
 }
 .nav-section {
   font-size: 0.7rem;
