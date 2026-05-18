@@ -132,36 +132,45 @@ async def upload_photo(
     assert photo_row is not None
     photo_id = photo_row["id"]
 
-    # 3. For videos, extract a thumbnail frame first; then detect + embed
-    frame_bytes = payload
-    if is_video:
-        try:
-            frame_bytes = await video.extract_thumbnail(payload)
-        except Exception as exc:
-            await db.execute(
-                "update public.photos set processing_error = $1 where id = $2",
-                f"thumbnail extraction failed: {exc}",
-                photo_id,
+    # 3. Run face analysis.
+    #    - Image: single analyze() call on the original bytes.
+    #    - Video: sample frames at ~1 fps, detect on each, then cluster
+    #      within the video so each real person becomes one row in faces
+    #      (not one row per frame they appear in).
+    thumb_frame_bytes: bytes | None = None
+    try:
+        if is_video:
+            faces, thumb_frame_bytes = await video.analyze_video(
+                payload,
+                ml_client().analyze,
             )
-            return PhotoOut(
-                id=photo_id,
-                storage_path=photo_row["storage_path"],
-                storage_bucket=photo_row["storage_bucket"],
-                uploaded_at=photo_row["uploaded_at"].isoformat(),
-                metadata=photo_row["metadata"],
-                faces=[],
-            )
+        else:
+            faces = await ml_client().analyze(payload, safe_name)
+    except Exception as exc:
+        await db.execute(
+            "update public.photos set processing_error = $1 where id = $2",
+            f"face analysis failed: {exc}",
+            photo_id,
+        )
+        return PhotoOut(
+            id=photo_id,
+            storage_path=photo_row["storage_path"],
+            storage_bucket=photo_row["storage_bucket"],
+            uploaded_at=photo_row["uploaded_at"].isoformat(),
+            metadata=photo_row["metadata"],
+            faces=[],
+        )
 
-        # Persist the extracted frame as the video's thumbnail so the UI
-        # can show it without re-running ffmpeg.
+    # For videos, persist the chosen thumbnail (best-face frame, or
+    # fallback frame) so the UI can render without re-running ffmpeg.
+    if is_video and thumb_frame_bytes:
         try:
             thumb_path = f"{user.id}/.thumbs/{photo_id}.jpg"
             storage.storage_client().storage.from_("thumbnails").upload(
                 thumb_path,
-                frame_bytes,
+                thumb_frame_bytes,
                 {"content-type": "image/jpeg", "upsert": "true"},
             )
-            # Stamp the metadata so the UI knows where to find the thumb.
             new_meta = dict(photo_row["metadata"] or {})
             new_meta["thumb_bucket"] = "thumbnails"
             new_meta["thumb_path"] = thumb_path
@@ -171,10 +180,8 @@ async def upload_photo(
                 photo_id,
             )
         except Exception:
-            # Non-fatal: ML will still run, UI falls back to native <video>
+            # Non-fatal: UI falls back to native <video>
             pass
-
-    faces = await ml_client().analyze(frame_bytes, safe_name)
 
     inserted_faces: list[FaceOut] = []
     for f in faces:
