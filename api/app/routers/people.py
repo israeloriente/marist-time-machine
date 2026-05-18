@@ -107,7 +107,14 @@ async def list_people(
         left join public.photos ph on ph.id = f.photo_id
         where {' and '.join(where_clauses)}
         group by p.id
-        order by face_count desc, p.created_at desc
+        -- Named people first, alphabetical (PT-BR collation if available).
+        -- Anonymous (NULL display_name) at the bottom, ordered by face count desc
+        -- so the most-photographed unknowns surface first.
+        order by
+          p.display_name is null,
+          p.display_name asc,
+          count(distinct f.id) desc,
+          p.created_at desc
         limit ${len(params) - 1} offset ${len(params)}
     """
     rows = await db.fetch(sql, *params)

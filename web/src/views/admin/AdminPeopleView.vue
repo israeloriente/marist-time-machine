@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import { RouterLink } from "vue-router";
+import { useRouter } from "vue-router";
 import FaceThumb from "@/components/FaceThumb.vue";
 import { peopleApi, type AvailableFilters, type Face, type Person } from "@/services/api";
+
+const router = useRouter();
 
 const people = ref<Person[]>([]);
 const loading = ref(true);
@@ -12,6 +14,11 @@ const query = ref("");
 const year = ref<number | "">("");
 const klass = ref<string>("");
 const available = ref<AvailableFilters>({ years: [], classes: [] });
+
+// Drag state
+const draggingId = ref<string | null>(null);
+const dropTargetId = ref<string | null>(null);
+const merging = ref(false);
 
 async function loadFilters() {
   try {
@@ -58,6 +65,89 @@ function clearFilters() {
 
 const hasFilters = computed(() => year.value !== "" || klass.value !== "" || query.value !== "");
 
+// ---------- Drag-and-drop merge (desktop only) ----------
+
+function onDragStart(p: Person, e: DragEvent) {
+  if (merging.value) return;
+  draggingId.value = p.id;
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = "move";
+    e.dataTransfer.setData("text/x-person-id", p.id);
+  }
+}
+
+function onDragEnd() {
+  draggingId.value = null;
+  dropTargetId.value = null;
+}
+
+function onDragOver(target: Person, e: DragEvent) {
+  if (!draggingId.value || draggingId.value === target.id) return;
+  e.preventDefault();
+  if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+}
+
+function onDragEnter(target: Person) {
+  if (!draggingId.value || draggingId.value === target.id) return;
+  dropTargetId.value = target.id;
+}
+
+function onDragLeave(target: Person, e: DragEvent) {
+  // Only clear if we actually left the element (not a child)
+  const related = e.relatedTarget as Node | null;
+  const currentTarget = e.currentTarget as Node | null;
+  if (currentTarget && related && currentTarget.contains(related)) return;
+  if (dropTargetId.value === target.id) dropTargetId.value = null;
+}
+
+async function onDrop(target: Person, e: DragEvent) {
+  e.preventDefault();
+  const sourceId = draggingId.value || e.dataTransfer?.getData("text/x-person-id");
+  draggingId.value = null;
+  dropTargetId.value = null;
+  if (!sourceId || sourceId === target.id) return;
+
+  const source = people.value.find((p) => p.id === sourceId);
+  if (!source) return;
+
+  const sourceLabel = source.display_name || `Pessoa ${source.id.slice(0, 8)}`;
+  const targetLabel = target.display_name || `Pessoa ${target.id.slice(0, 8)}`;
+  if (
+    !confirm(
+      `Mesclar "${sourceLabel}" em "${targetLabel}"?\n\n${source.face_count} rostos serão movidos. ` +
+        `"${sourceLabel}" será apagada.`,
+    )
+  )
+    return;
+
+  merging.value = true;
+  try {
+    await peopleApi.merge(sourceId, target.id);
+    // Optimistic: remove source from list and bump target's face count
+    people.value = people.value
+      .map((p) =>
+        p.id === target.id
+          ? { ...p, face_count: p.face_count + source.face_count }
+          : p,
+      )
+      .filter((p) => p.id !== sourceId);
+  } catch (err: any) {
+    alert("Erro ao mesclar: " + (err.response?.data?.detail ?? err.message ?? String(err)));
+    // Refresh from server to recover canonical state
+    await load();
+  } finally {
+    merging.value = false;
+  }
+}
+
+function goToPerson(p: Person, e: MouseEvent) {
+  // Ignore clicks that came from a drag operation
+  if (draggingId.value) return;
+  // Mouse middle / cmd-click open in new tab — let browser handle
+  if (e.metaKey || e.ctrlKey || e.button === 1) return;
+  router.push({ name: "person", params: { id: p.id } });
+}
+
 watch([year, klass], load);
 
 onMounted(async () => {
@@ -70,7 +160,10 @@ onMounted(async () => {
     <div>
       <h1>Pessoas</h1>
       <p class="muted">
-        Todos os clusters de rostos detectados. Filtre por ano/turma das fotos onde aparecem.
+        Filtre por ano/turma das fotos onde aparecem.
+        <span class="hint hide-on-mobile">
+          💡 Arraste uma pessoa em cima de outra pra mesclar.
+        </span>
       </p>
     </div>
   </header>
@@ -108,9 +201,7 @@ onMounted(async () => {
 
   <p v-if="loading" class="muted">Carregando…</p>
   <p v-else-if="!filtered.length" class="muted">
-    <template v-if="hasFilters">
-      Nenhuma pessoa nessa combinação de filtros.
-    </template>
+    <template v-if="hasFilters">Nenhuma pessoa nessa combinação de filtros.</template>
     <template v-else>
       Nenhuma pessoa ainda. Suba mais fotos ou rode "Reagrupar agora" no painel.
     </template>
@@ -120,11 +211,22 @@ onMounted(async () => {
       {{ filtered.length }} {{ filtered.length === 1 ? "pessoa" : "pessoas" }}
     </p>
     <div class="people-grid">
-      <RouterLink
+      <div
         v-for="p in filtered"
         :key="p.id"
-        :to="{ name: 'person', params: { id: p.id } }"
-        class="person-card"
+        :class="[
+          'person-card',
+          { dragging: draggingId === p.id, 'drop-target': dropTargetId === p.id },
+        ]"
+        :draggable="!merging"
+        :title="p.display_name || 'Sem nome'"
+        @click="goToPerson(p, $event)"
+        @dragstart="onDragStart(p, $event)"
+        @dragend="onDragEnd"
+        @dragover="onDragOver(p, $event)"
+        @dragenter.prevent="onDragEnter(p)"
+        @dragleave="onDragLeave(p, $event)"
+        @drop="onDrop(p, $event)"
       >
         <FaceThumb
           v-if="thumbCache[p.id]"
@@ -140,7 +242,7 @@ onMounted(async () => {
           <span v-for="y in p.graduation_years" :key="`y-${y}`" class="tag tag-year">{{ y }}</span>
           <span v-for="c in p.classes" :key="`c-${c}`" class="tag tag-class">{{ c }}</span>
         </div>
-      </RouterLink>
+      </div>
     </div>
   </div>
 </template>
@@ -149,6 +251,16 @@ onMounted(async () => {
 .page-header { margin-bottom: 1rem; }
 .page-header h1 { margin: 0; }
 .page-header p { margin: 0.2rem 0 0; }
+.hint {
+  display: inline-block;
+  margin-left: 0.4rem;
+  color: var(--marista-blue);
+  font-size: 0.85rem;
+}
+.hide-on-mobile { display: none; }
+@media (min-width: 768px) {
+  .hide-on-mobile { display: inline; }
+}
 
 .filters {
   margin-bottom: 1.25rem;
@@ -167,9 +279,7 @@ onMounted(async () => {
   font-size: 0.85rem;
   color: var(--muted);
 }
-.clear-btn {
-  align-self: stretch;
-}
+.clear-btn { align-self: stretch; }
 @media (min-width: 640px) {
   .filter-grid {
     grid-template-columns: 2fr 1fr 1fr max-content;
@@ -190,14 +300,27 @@ onMounted(async () => {
   gap: 0.45rem;
   padding: 0.85rem 0.6rem;
   background: var(--surface);
-  border: 1px solid var(--border);
+  border: 2px solid var(--border);
   border-radius: 12px;
   text-decoration: none;
   color: var(--text);
   text-align: center;
-  transition: border-color 0.15s;
+  cursor: pointer;
+  user-select: none;
+  transition: border-color 0.15s, transform 0.1s, box-shadow 0.15s;
 }
 .person-card:hover { border-color: var(--marista-blue); }
+.person-card.dragging {
+  opacity: 0.5;
+  transform: scale(0.96);
+}
+.person-card.drop-target {
+  border-color: var(--marista-yellow);
+  border-style: dashed;
+  background: rgba(247, 201, 72, 0.15);
+  transform: scale(1.04);
+  box-shadow: 0 4px 16px rgba(247, 201, 72, 0.35);
+}
 .thumb-placeholder {
   width: 96px; height: 96px;
   border-radius: 8px;
