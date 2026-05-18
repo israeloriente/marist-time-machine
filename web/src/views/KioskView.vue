@@ -17,8 +17,11 @@ const error = ref<string | null>(null);
 
 // Reveal phase: drip photos one at a time
 const revealIdx = ref(0);
+const revealLoaded = ref(false);    // true once current photo has decoded
 let revealTimer: number | null = null;
-const PHOTO_REVEAL_MS = 4000;       // how long each photo stays on screen
+let revealSafetyTimer: number | null = null;
+const PHOTO_REVEAL_MS = 4000;       // hold each photo this long AFTER it loads
+const MAX_LOAD_WAIT_MS = 8000;      // give up waiting for a slow image
 const MAX_REVEAL_PHOTOS = 12;       // cap reveal duration; rest goes to grid
 
 const currentYear = new Date().getFullYear();
@@ -283,33 +286,100 @@ async function startJourney() {
   }
 }
 
+function totalReveal(): number {
+  return Math.min(result.value?.photos.length ?? 0, MAX_REVEAL_PHOTOS);
+}
+
 function startReveal() {
   // Tear down any prior reveal cleanly
   stopReveal();
 
   phase.value = "reveal";
   revealIdx.value = 0;
+  revealLoaded.value = false;
 
-  const total = Math.min(result.value?.photos.length ?? 0, MAX_REVEAL_PHOTOS);
-  if (total === 0) {
+  if (totalReveal() === 0) {
     phase.value = "results";
     return;
   }
 
-  // Schedule a single timeout that drips one photo at a time. Recursive
-  // setTimeout (NOT setInterval) so timer handles never get confused.
-  const tick = () => {
+  // First photo: starts a safety timer that advances if the image takes
+  // too long to decode. Once the <img> fires `load`, onPhotoLoaded() takes
+  // over and schedules the regular PHOTO_REVEAL_MS hold.
+  armSafetyTimer();
+  preloadNext();
+}
+
+/** Called by the <img>'s @load — we know it's painted on screen now. */
+function onPhotoLoaded() {
+  if (phase.value !== "reveal" || revealLoaded.value) return;
+  clearSafetyTimer();
+  revealLoaded.value = true;
+  scheduleAdvance(PHOTO_REVEAL_MS);
+  preloadNext();
+}
+
+/** Called by the <img>'s @error — skip it instead of getting stuck. */
+function onPhotoError() {
+  if (phase.value !== "reveal") return;
+  clearSafetyTimer();
+  // Move on immediately — we don't want to stare at a broken photo.
+  scheduleAdvance(300);
+}
+
+function advanceReveal() {
+  if (phase.value !== "reveal") return;
+  const total = totalReveal();
+  if (revealIdx.value < total - 1) {
+    revealIdx.value += 1;
+    revealLoaded.value = false;
+    armSafetyTimer();
+  } else {
+    phase.value = "results";
+  }
+}
+
+function scheduleAdvance(delayMs: number) {
+  clearAdvanceTimer();
+  revealTimer = window.setTimeout(() => {
     revealTimer = null;
-    if (phase.value !== "reveal") return;          // already exited
-    if (revealIdx.value < total - 1) {
-      revealIdx.value += 1;
-      revealTimer = window.setTimeout(tick, PHOTO_REVEAL_MS);
-    } else {
-      // Held the last photo for PHOTO_REVEAL_MS; now flip to grid.
-      phase.value = "results";
+    advanceReveal();
+  }, delayMs);
+}
+
+function armSafetyTimer() {
+  clearSafetyTimer();
+  revealSafetyTimer = window.setTimeout(() => {
+    revealSafetyTimer = null;
+    // Image never fired load within budget — advance anyway so the user
+    // doesn't sit on a skeleton forever.
+    if (!revealLoaded.value && phase.value === "reveal") {
+      advanceReveal();
     }
-  };
-  revealTimer = window.setTimeout(tick, PHOTO_REVEAL_MS);
+  }, MAX_LOAD_WAIT_MS);
+}
+
+function preloadNext() {
+  const next = result.value?.photos[revealIdx.value + 1];
+  if (!next) return;
+  const url = next.thumb_signed_url || next.signed_url;
+  const img = new Image();
+  // browser will decode + cache; when the <img> in the DOM picks the same
+  // URL it's served from cache and fires @load almost instantly.
+  img.src = url;
+}
+
+function clearAdvanceTimer() {
+  if (revealTimer !== null) {
+    window.clearTimeout(revealTimer);
+    revealTimer = null;
+  }
+}
+function clearSafetyTimer() {
+  if (revealSafetyTimer !== null) {
+    window.clearTimeout(revealSafetyTimer);
+    revealSafetyTimer = null;
+  }
 }
 
 function skipReveal() {
@@ -318,10 +388,9 @@ function skipReveal() {
 }
 
 function stopReveal() {
-  if (revealTimer !== null) {
-    window.clearTimeout(revealTimer);
-    revealTimer = null;
-  }
+  clearAdvanceTimer();
+  clearSafetyTimer();
+  revealLoaded.value = false;
 }
 
 const currentRevealPhoto = computed(() => {
@@ -490,9 +559,11 @@ onBeforeUnmount(() => {
           <div
             v-if="currentRevealPhoto"
             :key="currentRevealPhoto.photo_id"
-            class="reveal-frame ken-burns-slow"
+            class="reveal-frame"
+            :class="{ 'ken-burns-slow': revealLoaded }"
           >
             <div
+              v-if="revealLoaded"
               class="reveal-bg"
               :style="{
                 backgroundImage: `url(${
@@ -503,8 +574,16 @@ onBeforeUnmount(() => {
             <img
               :src="currentRevealPhoto.thumb_signed_url || currentRevealPhoto.signed_url"
               class="reveal-fg"
+              :class="{ 'is-loaded': revealLoaded }"
               alt=""
+              decoding="async"
+              @load="onPhotoLoaded"
+              @error="onPhotoError"
             />
+            <div v-if="!revealLoaded" class="reveal-skeleton">
+              <div class="skeleton-shimmer" />
+              <p class="skeleton-text">Carregando memória…</p>
+            </div>
           </div>
         </transition-group>
 
@@ -862,6 +941,48 @@ onBeforeUnmount(() => {
   width: 100%;
   height: 100%;
   object-fit: contain;
+  opacity: 0;                    /* hidden until @load fires */
+  transition: opacity 0.4s ease;
+}
+.reveal-fg.is-loaded {
+  opacity: 1;
+}
+
+/* Skeleton while the photo is downloading/decoding */
+.reveal-skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, #0c2c4f 0%, #0a1f3a 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 1rem;
+}
+.skeleton-shimmer {
+  width: min(60vw, 360px);
+  height: min(40vw, 240px);
+  border-radius: 16px;
+  background:
+    linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.04) 0%,
+      rgba(255, 255, 255, 0.12) 50%,
+      rgba(255, 255, 255, 0.04) 100%
+    );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s ease-in-out infinite;
+}
+.skeleton-text {
+  color: rgba(255, 255, 255, 0.55);
+  margin: 0;
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+}
+@keyframes shimmer {
+  0%   { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
 }
 .ken-burns-slow {
   animation: kenburns-slow 4.5s ease-out forwards;
