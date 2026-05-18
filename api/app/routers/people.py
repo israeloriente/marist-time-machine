@@ -146,6 +146,7 @@ async def person_photos(person_id: UUID, _user: User = CurrentUser) -> list[dict
 async def person_faces(person_id: UUID, _user: User = CurrentUser) -> list[dict]:
     """List all faces assigned to this person with bbox + parent photo URL."""
     from ..services import storage as storage_svc
+    from .faces import _coerce_bbox
     rows = await db.fetch(
         """
         select f.id, f.bbox, f.detection_score, p.id as photo_id,
@@ -162,7 +163,7 @@ async def person_faces(person_id: UUID, _user: User = CurrentUser) -> list[dict]
         out.append({
             "id": str(r["id"]),
             "photo_id": str(r["photo_id"]),
-            "bbox": r["bbox"],
+            "bbox": _coerce_bbox(r["bbox"]),
             "detection_score": float(r["detection_score"] or 0),
             "signed_url": storage_svc.signed_url(r["storage_bucket"], r["storage_path"]),
         })

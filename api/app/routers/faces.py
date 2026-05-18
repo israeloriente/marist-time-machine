@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -12,6 +14,24 @@ from ..deps import CurrentUser, User
 from ..services import storage as storage_svc
 
 router = APIRouter(prefix="/faces", tags=["faces"])
+
+
+def _coerce_bbox(raw: Any) -> list[float]:
+    """Old rows stored bbox as a JSON string (double-encoded). Normalize."""
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except json.JSONDecodeError:
+            return []
+    if isinstance(raw, dict):
+        # very old shape: {"x":..,"y":..,"w":..,"h":..}
+        if all(k in raw for k in ("x", "y", "w", "h")):
+            x, y, w, h = raw["x"], raw["y"], raw["w"], raw["h"]
+            return [float(x), float(y), float(x + w), float(y + h)]
+        return []
+    if isinstance(raw, list):
+        return [float(v) for v in raw]
+    return []
 
 
 class FaceOut(BaseModel):
@@ -54,7 +74,7 @@ async def list_unassigned(
         FaceOut(
             id=r["id"],
             photo_id=r["photo_id"],
-            bbox=r["bbox"],
+            bbox=_coerce_bbox(r["bbox"]),
             detection_score=float(r["detection_score"] or 0),
             person_id=r["person_id"],
             signed_url=storage_svc.signed_url(r["storage_bucket"], r["storage_path"]),
