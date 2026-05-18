@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
 import FaceThumb from "@/components/FaceThumb.vue";
 import {
+  dedupePhotos,
   facesApi,
   peopleApi,
   type ClusterStats,
@@ -17,6 +18,7 @@ const tab = ref<Tab>("people");
 const stats = ref<ClusterStats | null>(null);
 const status = ref<ReclusterStatus | null>(null);
 const reclusterBusy = ref(false);
+const dedupeBusy = ref(false);
 
 const people = ref<Person[]>([]);
 const peopleLoading = ref(false);
@@ -69,6 +71,28 @@ async function loadUnassigned(reset = false) {
     unassignedMore.value = batch.length === 50;
   } finally {
     unassignedLoading.value = false;
+  }
+}
+
+async function runDedupe() {
+  if (
+    !confirm(
+      "Procurar e remover fotos duplicadas?\n\nIsso percorre todas as fotos sem hash, computa SHA-256 e mescla duplicatas. Pode levar alguns minutos.",
+    )
+  )
+    return;
+  dedupeBusy.value = true;
+  try {
+    const r = await dedupePhotos();
+    alert(
+      `Concluído.\n${r.photos_visited} fotos vistas.\n${r.duplicates_removed} duplicatas removidas.\n${r.hashed} novas com hash.\n${r.errors} erros.`,
+    );
+    await loadStats();
+    await loadPeople();
+  } catch (e: any) {
+    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } finally {
+    dedupeBusy.value = false;
   }
 }
 
@@ -151,9 +175,14 @@ function switchTab(t: Tab) {
   <section class="card">
     <div class="header-row">
       <h2 style="margin: 0">Admin</h2>
-      <button class="button secondary" :disabled="reclusterBusy" @click="runRecluster">
-        {{ reclusterBusy ? "Reagrupando…" : "Reagrupar agora" }}
-      </button>
+      <div style="display: flex; gap: 0.5rem; flex-wrap: wrap">
+        <button class="button secondary" :disabled="dedupeBusy" @click="runDedupe">
+          {{ dedupeBusy ? "Procurando…" : "Remover duplicadas" }}
+        </button>
+        <button class="button secondary" :disabled="reclusterBusy" @click="runRecluster">
+          {{ reclusterBusy ? "Reagrupando…" : "Reagrupar agora" }}
+        </button>
+      </div>
     </div>
 
     <div v-if="stats" class="stats">

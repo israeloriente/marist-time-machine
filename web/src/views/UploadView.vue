@@ -7,7 +7,7 @@ interface QueuedFile {
   file: File;
   preview: string;
   kind: "image" | "video";
-  status: "pending" | "uploading" | "processing" | "done" | "error";
+  status: "pending" | "uploading" | "processing" | "done" | "duplicate" | "error";
   uploadPct: number;     // 0-100 (bytes sent)
   message?: string;
   facesFound?: number;
@@ -40,6 +40,7 @@ const stats = computed(() => ({
   total: queue.value.length,
   pending: queue.value.filter((q) => q.status === "pending").length,
   done: queue.value.filter((q) => q.status === "done").length,
+  dup: queue.value.filter((q) => q.status === "duplicate").length,
   err: queue.value.filter((q) => q.status === "error").length,
   active: queue.value.filter((q) => q.status === "uploading" || q.status === "processing").length,
 }));
@@ -47,8 +48,7 @@ const stats = computed(() => ({
 const overallPct = computed(() => {
   if (!queue.value.length) return 0;
   const sum = queue.value.reduce((acc, q) => {
-    if (q.status === "done") return acc + 100;
-    if (q.status === "error") return acc + 100;
+    if (q.status === "done" || q.status === "duplicate" || q.status === "error") return acc + 100;
     if (q.status === "processing") return acc + 100; // bytes sent, server-side now
     return acc + q.uploadPct;
   }, 0);
@@ -96,7 +96,7 @@ function removeItem(id: string) {
 }
 
 function clearDone() {
-  queue.value = queue.value.filter((q) => q.status !== "done");
+  queue.value = queue.value.filter((q) => q.status !== "done" && q.status !== "duplicate");
 }
 
 async function processOne(item: QueuedFile) {
@@ -115,13 +115,19 @@ async function processOne(item: QueuedFile) {
         signal: item.abort.signal,
       },
     );
-    item.status = "done";
     item.uploadPct = 100;
-    item.facesFound = res?.faces?.length ?? 0;
-    item.message =
-      item.facesFound === 0
-        ? "nenhum rosto detectado"
-        : `${item.facesFound} ${item.facesFound === 1 ? "rosto" : "rostos"} detectados`;
+    if (res?.duplicate) {
+      item.status = "duplicate";
+      item.message = "já existe na base";
+      item.facesFound = 0;
+    } else {
+      item.status = "done";
+      item.facesFound = res?.faces?.length ?? 0;
+      item.message =
+        item.facesFound === 0
+          ? "nenhum rosto detectado"
+          : `${item.facesFound} ${item.facesFound === 1 ? "rosto" : "rostos"} detectados`;
+    }
   } catch (e: any) {
     if (item.abort?.signal.aborted) {
       item.status = "error";
@@ -227,6 +233,7 @@ function cancelAll() {
         <span>{{ overallPct }}%</span>
         <span class="muted">
           {{ stats.done }}/{{ stats.total }} concluídas
+          <span v-if="stats.dup">· {{ stats.dup }} duplicada{{ stats.dup === 1 ? "" : "s" }}</span>
           <span v-if="stats.err" class="error">· {{ stats.err }} erro</span>
         </span>
       </div>
@@ -254,7 +261,7 @@ function cancelAll() {
           <span class="muted small">{{ (q.file.size / 1024 / 1024).toFixed(1) }} MB</span>
 
           <!-- Per-item progress bar -->
-          <div v-if="q.status !== 'done' && q.status !== 'error'" class="bar">
+          <div v-if="q.status !== 'done' && q.status !== 'duplicate' && q.status !== 'error'" class="bar">
             <div
               class="bar-fill"
               :class="{ indeterminate: q.status === 'processing' }"
@@ -267,6 +274,7 @@ function cancelAll() {
             <template v-else-if="q.status === 'uploading'">{{ q.uploadPct }}%</template>
             <template v-else-if="q.status === 'processing'">Analisando rostos…</template>
             <template v-else-if="q.status === 'done'">✓ {{ q.message }}</template>
+            <template v-else-if="q.status === 'duplicate'">⏭ {{ q.message }}</template>
             <template v-else-if="q.status === 'error'" class="error">✗ {{ q.message }}</template>
           </span>
         </div>
@@ -439,6 +447,8 @@ function cancelAll() {
 .status-text { font-size: 0.8rem; color: var(--muted); }
 .queue-item.done .status-text { color: #4ade80; }
 .queue-item.done { border-color: rgba(74, 222, 128, 0.4); }
+.queue-item.duplicate { border-color: rgba(170, 182, 207, 0.4); opacity: 0.7; }
+.queue-item.duplicate .status-text { color: var(--muted); }
 .queue-item.error .status-text,
 .queue-item.error { border-color: rgba(255, 107, 107, 0.5); }
 .queue-item.error .status-text { color: var(--error); }

@@ -48,6 +48,17 @@ export interface UploadResponse {
     bbox: number[];
     detection_score: number;
   }>;
+  duplicate?: boolean;
+}
+
+export async function dedupePhotos(): Promise<{
+  photos_visited: number;
+  hashed: number;
+  duplicates_removed: number;
+  errors: number;
+}> {
+  const { data } = await api.post("/photos/dedupe", null, { timeout: 30 * 60 * 1000 });
+  return data;
 }
 
 export async function uploadPhoto(

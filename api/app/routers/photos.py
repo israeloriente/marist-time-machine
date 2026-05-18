@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from uuid import UUID
 
@@ -32,6 +33,7 @@ class PhotoOut(BaseModel):
     uploaded_at: str
     metadata: dict
     faces: list[FaceOut] = []
+    duplicate: bool = False  # true when the upload matched an existing photo by content hash
 
 
 @router.post("", response_model=PhotoOut)
@@ -61,7 +63,29 @@ async def upload_photo(
 
     metadata["media_type"] = "video" if is_video else "image"
 
-    # 1. Persist original to Supabase Storage
+    # 1. Dedupe check by content hash (SHA-256 of the raw bytes)
+    content_hash = hashlib.sha256(payload).hexdigest()
+    existing = await db.fetchrow(
+        """
+        select id, storage_path, storage_bucket, uploaded_at, metadata
+        from public.photos
+        where content_hash = $1
+        limit 1
+        """,
+        content_hash,
+    )
+    if existing:
+        return PhotoOut(
+            id=existing["id"],
+            storage_path=existing["storage_path"],
+            storage_bucket=existing["storage_bucket"],
+            uploaded_at=existing["uploaded_at"].isoformat(),
+            metadata=existing["metadata"] if isinstance(existing["metadata"], dict) else {},
+            faces=[],
+            duplicate=True,
+        )
+
+    # 2. Persist original to Supabase Storage
     safe_name = file.filename or ("upload.mp4" if is_video else "upload.jpg")
     path = f"{user.id}/{safe_name}"
     storage.storage_client().storage.from_("photos").upload(
@@ -70,17 +94,18 @@ async def upload_photo(
         {"content-type": file.content_type or "application/octet-stream", "upsert": "true"},
     )
 
-    # 2. Insert photo row
+    # 3. Insert photo row (with content_hash)
     photo_row = await db.fetchrow(
         """
-        insert into public.photos (storage_bucket, storage_path, original_filename, uploaded_by, metadata)
-        values ('photos', $1, $2, $3, $4)
+        insert into public.photos (storage_bucket, storage_path, original_filename, uploaded_by, metadata, content_hash)
+        values ('photos', $1, $2, $3, $4, $5)
         returning id, storage_path, storage_bucket, uploaded_at, metadata
         """,
         path,
         safe_name,
         UUID(user.id),
         metadata,
+        content_hash,
     )
     assert photo_row is not None
     photo_id = photo_row["id"]
@@ -171,6 +196,65 @@ async def list_photos(limit: int = 50, offset: int = 0, _user: User = CurrentUse
         )
         for r in rows
     ]
+
+
+@router.post("/dedupe")
+async def dedupe(_user: User = CurrentUser) -> dict:
+    """Backfill content_hash for legacy photos and remove duplicates.
+
+    For each photo without content_hash: download its bytes from storage,
+    compute SHA-256, set the hash. If another photo already has that hash,
+    move faces to the survivor and delete the duplicate row (storage object
+    is kept; safe to garbage-collect later).
+    """
+    rows = await db.fetch(
+        """
+        select id, storage_bucket, storage_path
+        from public.photos
+        where content_hash is null
+        order by uploaded_at asc
+        """,
+    )
+
+    hashed = 0
+    duplicates_removed = 0
+    errors = 0
+
+    for r in rows:
+        try:
+            data = storage.download(r["storage_bucket"], r["storage_path"])
+            h = hashlib.sha256(data).hexdigest()
+
+            # Is there another row with this hash already?
+            existing = await db.fetchrow(
+                "select id from public.photos where content_hash = $1 limit 1",
+                h,
+            )
+            if existing:
+                # Reassign faces to the survivor and delete this row
+                await db.execute(
+                    "update public.faces set photo_id = $1 where photo_id = $2",
+                    existing["id"],
+                    r["id"],
+                )
+                await db.execute("delete from public.photos where id = $1", r["id"])
+                duplicates_removed += 1
+            else:
+                await db.execute(
+                    "update public.photos set content_hash = $1 where id = $2",
+                    h,
+                    r["id"],
+                )
+                hashed += 1
+        except Exception:
+            errors += 1
+
+    return {
+        "photos_visited": len(rows),
+        "hashed": hashed,
+        "duplicates_removed": duplicates_removed,
+        "errors": errors,
+    }
 
 
 @router.get("/{photo_id}/url")
