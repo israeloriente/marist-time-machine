@@ -54,11 +54,16 @@ async def list_unassigned(
     min_score: float = 0.0,
     _user: User = CurrentUser,
 ) -> list[FaceOut]:
-    """List faces that don't belong to any person yet."""
+    """List faces that don't belong to any person yet.
+
+    For faces extracted from videos, signed_url is the thumbnail JPEG so
+    the canvas-based FaceThumb can crop bbox region. The bbox coords are
+    in the thumbnail pixel space (same frame the ML ran on).
+    """
     rows = await db.fetch(
         """
         select f.id, f.photo_id, f.bbox, f.detection_score, f.person_id,
-               p.storage_bucket, p.storage_path
+               p.storage_bucket, p.storage_path, p.metadata
         from public.faces f
         join public.photos p on p.id = f.photo_id
         where f.person_id is null
@@ -77,7 +82,9 @@ async def list_unassigned(
             bbox=_coerce_bbox(r["bbox"]),
             detection_score=float(r["detection_score"] or 0),
             person_id=r["person_id"],
-            signed_url=storage_svc.signed_url(r["storage_bucket"], r["storage_path"]),
+            signed_url=storage_svc.thumb_signed_url(
+                r["metadata"] or {}, r["storage_bucket"], r["storage_path"]
+            ),
         )
         for r in rows
     ]

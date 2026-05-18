@@ -248,26 +248,34 @@ async def person_photos(person_id: UUID, _user: User = CurrentUser) -> list[dict
     )
     out = []
     for r in rows:
+        meta = r["metadata"] or {}
         out.append({
             "id": str(r["id"]),
             "storage_bucket": r["storage_bucket"],
             "storage_path": r["storage_path"],
             "uploaded_at": r["uploaded_at"].isoformat(),
-            "metadata": r["metadata"],
+            "metadata": meta,
+            "media_type": meta.get("media_type", "image"),
             "signed_url": storage_svc.signed_url(r["storage_bucket"], r["storage_path"]),
+            "thumb_signed_url": storage_svc.thumb_signed_url(meta, r["storage_bucket"], r["storage_path"]),
         })
     return out
 
 
 @router.get("/{person_id}/faces")
 async def person_faces(person_id: UUID, _user: User = CurrentUser) -> list[dict]:
-    """List all faces assigned to this person with bbox + parent photo URL."""
+    """List all faces assigned to this person with bbox + parent photo URL.
+
+    For faces from videos, signed_url points to the thumbnail JPEG so that
+    FaceThumb's canvas can crop the bbox region. Returning the .mp4 here
+    would make FaceThumb fail silently because <img> can't load video.
+    """
     from ..services import storage as storage_svc
     from .faces import _coerce_bbox
     rows = await db.fetch(
         """
         select f.id, f.bbox, f.detection_score, p.id as photo_id,
-               p.storage_bucket, p.storage_path
+               p.storage_bucket, p.storage_path, p.metadata
         from public.faces f
         join public.photos p on p.id = f.photo_id
         where f.person_id = $1
@@ -277,11 +285,12 @@ async def person_faces(person_id: UUID, _user: User = CurrentUser) -> list[dict]
     )
     out = []
     for r in rows:
+        meta = r["metadata"] or {}
         out.append({
             "id": str(r["id"]),
             "photo_id": str(r["photo_id"]),
             "bbox": _coerce_bbox(r["bbox"]),
             "detection_score": float(r["detection_score"] or 0),
-            "signed_url": storage_svc.signed_url(r["storage_bucket"], r["storage_path"]),
+            "signed_url": storage_svc.thumb_signed_url(meta, r["storage_bucket"], r["storage_path"]),
         })
     return out

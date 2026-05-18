@@ -129,6 +129,29 @@ async def upload_photo(
                 metadata=photo_row["metadata"],
                 faces=[],
             )
+
+        # Persist the extracted frame as the video's thumbnail so the UI
+        # can show it without re-running ffmpeg.
+        try:
+            thumb_path = f"{user.id}/.thumbs/{photo_id}.jpg"
+            storage.storage_client().storage.from_("thumbnails").upload(
+                thumb_path,
+                frame_bytes,
+                {"content-type": "image/jpeg", "upsert": "true"},
+            )
+            # Stamp the metadata so the UI knows where to find the thumb.
+            new_meta = dict(photo_row["metadata"] or {})
+            new_meta["thumb_bucket"] = "thumbnails"
+            new_meta["thumb_path"] = thumb_path
+            await db.execute(
+                "update public.photos set metadata = $1 where id = $2",
+                new_meta,
+                photo_id,
+            )
+        except Exception:
+            # Non-fatal: ML will still run, UI falls back to native <video>
+            pass
+
     faces = await ml_client().analyze(frame_bytes, safe_name)
 
     inserted_faces: list[FaceOut] = []
@@ -196,6 +219,61 @@ async def list_photos(limit: int = 50, offset: int = 0, _user: User = CurrentUse
         )
         for r in rows
     ]
+
+
+@router.post("/regenerate-thumbnails")
+async def regenerate_thumbnails(_user: User = CurrentUser) -> dict:
+    """Generate missing thumbnails for legacy videos.
+
+    Walks every photo with metadata.media_type=='video' that doesn't already
+    have metadata.thumb_path. Downloads the original, extracts a JPEG frame
+    via ffmpeg, uploads to the 'thumbnails' bucket, and stamps the metadata.
+    """
+    rows = await db.fetch(
+        """
+        select id, storage_bucket, storage_path, uploaded_by, metadata
+        from public.photos
+        where metadata->>'media_type' = 'video'
+          and (metadata->>'thumb_path' is null or metadata->>'thumb_path' = '')
+        order by uploaded_at asc
+        """,
+    )
+
+    generated = 0
+    errors = 0
+
+    for r in rows:
+        try:
+            data = storage.download(r["storage_bucket"], r["storage_path"])
+            frame = await video.extract_thumbnail(data)
+
+            owner = r["uploaded_by"]
+            owner_str = str(owner) if owner else "system"
+            thumb_path = f"{owner_str}/.thumbs/{r['id']}.jpg"
+
+            storage.storage_client().storage.from_("thumbnails").upload(
+                thumb_path,
+                frame,
+                {"content-type": "image/jpeg", "upsert": "true"},
+            )
+
+            new_meta = dict(r["metadata"] or {})
+            new_meta["thumb_bucket"] = "thumbnails"
+            new_meta["thumb_path"] = thumb_path
+            await db.execute(
+                "update public.photos set metadata = $1 where id = $2",
+                new_meta,
+                r["id"],
+            )
+            generated += 1
+        except Exception:
+            errors += 1
+
+    return {
+        "videos_visited": len(rows),
+        "thumbnails_generated": generated,
+        "errors": errors,
+    }
 
 
 @router.post("/dedupe")

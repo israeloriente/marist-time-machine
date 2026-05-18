@@ -20,6 +20,8 @@ export interface MatchedPhoto {
   storage_path: string;
   uploaded_at: string;
   signed_url: string;
+  thumb_signed_url: string;
+  media_type: "image" | "video";
   distance: number;
 }
 
@@ -58,6 +60,17 @@ export async function dedupePhotos(): Promise<{
   errors: number;
 }> {
   const { data } = await api.post("/photos/dedupe", null, { timeout: 30 * 60 * 1000 });
+  return data;
+}
+
+export async function regenerateVideoThumbnails(): Promise<{
+  videos_visited: number;
+  thumbnails_generated: number;
+  errors: number;
+}> {
+  const { data } = await api.post("/photos/regenerate-thumbnails", null, {
+    timeout: 30 * 60 * 1000,
+  });
   return data;
 }
 
@@ -116,7 +129,9 @@ export interface PersonPhoto {
   storage_path: string;
   uploaded_at: string;
   metadata: Record<string, unknown>;
+  media_type: "image" | "video";
   signed_url: string;
+  thumb_signed_url: string;
 }
 
 export interface ClusterStats {

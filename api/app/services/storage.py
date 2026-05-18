@@ -59,3 +59,18 @@ def signed_url(bucket: str, path: str, expires_in: int = 3600) -> str:
 
 def public_url(bucket: str, path: str) -> str:
     return f"{_public_base()}/storage/v1/object/public/{bucket}/{path}"
+
+
+def thumb_signed_url(metadata: dict | None, default_bucket: str, default_path: str) -> str:
+    """Return a signed URL for the photo's thumbnail.
+
+    For videos we expect metadata to contain {thumb_bucket, thumb_path}.
+    For photos (and videos that haven't been thumbnailed yet) we fall back
+    to the original file.
+    """
+    if metadata and metadata.get("thumb_bucket") and metadata.get("thumb_path"):
+        try:
+            return signed_url(metadata["thumb_bucket"], metadata["thumb_path"])
+        except Exception:
+            pass
+    return signed_url(default_bucket, default_path)

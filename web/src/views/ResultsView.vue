@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { RouterLink } from "vue-router";
+import MediaPreview from "@/components/MediaPreview.vue";
 import { useResultsStore } from "@/stores/results";
 
 const results = useResultsStore();
@@ -32,11 +33,28 @@ const results = useResultsStore();
           :href="p.signed_url"
           target="_blank"
           rel="noopener"
+          class="result-tile"
           :title="`distância ${p.distance.toFixed(3)}`"
         >
-          <img :src="p.signed_url" :alt="`Foto ${p.photo_id}`" loading="lazy" />
+          <MediaPreview
+            :src="p.signed_url"
+            :thumb-src="p.thumb_signed_url"
+            :media-type="p.media_type"
+            :alt="`Mídia ${p.photo_id}`"
+          />
         </a>
       </div>
     </template>
   </section>
 </template>
+
+<style scoped>
+.result-tile {
+  display: block;
+  aspect-ratio: 1 / 1;
+  border-radius: 10px;
+  overflow: hidden;
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+}
+</style>

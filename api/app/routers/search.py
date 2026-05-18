@@ -29,6 +29,8 @@ class MatchedPhoto(BaseModel):
     storage_path: str
     uploaded_at: str
     signed_url: str
+    thumb_signed_url: str
+    media_type: str = "image"  # "image" or "video"
     distance: float
 
 
@@ -101,7 +103,7 @@ async def search_by_face(
         # Fall back to raw face-to-face matches if no clustered person within range
         raw = await db.fetch(
             """
-            select f.id, f.photo_id, p.storage_bucket, p.storage_path, p.uploaded_at,
+            select f.id, f.photo_id, p.storage_bucket, p.storage_path, p.uploaded_at, p.metadata,
                    f.embedding <=> $1 as distance
             from public.faces f
             join public.photos p on p.id = f.photo_id
@@ -115,7 +117,9 @@ async def search_by_face(
         for r in raw:
             if r["distance"] > search_distance:
                 continue
+            meta = r["metadata"] or {}
             url = storage.signed_url(r["storage_bucket"], r["storage_path"])
+            thumb = storage.thumb_signed_url(meta, r["storage_bucket"], r["storage_path"])
             photos.append(
                 MatchedPhoto(
                     photo_id=r["photo_id"],
@@ -123,6 +127,8 @@ async def search_by_face(
                     storage_path=r["storage_path"],
                     uploaded_at=r["uploaded_at"].isoformat(),
                     signed_url=url,
+                    thumb_signed_url=thumb,
+                    media_type=meta.get("media_type", "image"),
                     distance=float(r["distance"]),
                 )
             )
@@ -132,12 +138,12 @@ async def search_by_face(
 
     rows = await db.fetch(
         """
-        select ph.id as photo_id, ph.storage_bucket, ph.storage_path, ph.uploaded_at,
+        select ph.id as photo_id, ph.storage_bucket, ph.storage_path, ph.uploaded_at, ph.metadata,
                min(f.embedding <=> $1) as distance
         from public.faces f
         join public.photos ph on ph.id = f.photo_id
         where f.person_id = $2
-        group by ph.id, ph.storage_bucket, ph.storage_path, ph.uploaded_at
+        group by ph.id, ph.storage_bucket, ph.storage_path, ph.uploaded_at, ph.metadata
         order by distance asc
         limit $3
         """,
@@ -148,7 +154,9 @@ async def search_by_face(
 
     photos = []
     for r in rows:
+        meta = r["metadata"] or {}
         url = storage.signed_url(r["storage_bucket"], r["storage_path"])
+        thumb = storage.thumb_signed_url(meta, r["storage_bucket"], r["storage_path"])
         photos.append(
             MatchedPhoto(
                 photo_id=r["photo_id"],
@@ -156,6 +164,8 @@ async def search_by_face(
                 storage_path=r["storage_path"],
                 uploaded_at=r["uploaded_at"].isoformat(),
                 signed_url=url,
+                thumb_signed_url=thumb,
+                media_type=meta.get("media_type", "image"),
                 distance=float(r["distance"]),
             )
         )

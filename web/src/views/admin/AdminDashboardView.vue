@@ -4,6 +4,7 @@ import { RouterLink } from "vue-router";
 import {
   dedupePhotos,
   peopleApi,
+  regenerateVideoThumbnails,
   suggestionsApi,
   type ClusterStats,
   type ReclusterStatus,
@@ -14,6 +15,7 @@ const status = ref<ReclusterStatus | null>(null);
 const suggestionsPending = ref<number>(0);
 const reclusterBusy = ref(false);
 const dedupeBusy = ref(false);
+const thumbsBusy = ref(false);
 
 async function load() {
   const [s, st, sug] = await Promise.all([
@@ -55,6 +57,21 @@ async function runRecluster() {
   }
 }
 
+async function runRegenThumbs() {
+  if (!confirm("Gerar thumbnails dos vídeos que ainda não têm? Pode levar alguns minutos.")) return;
+  thumbsBusy.value = true;
+  try {
+    const r = await regenerateVideoThumbnails();
+    alert(
+      `Concluído.\n${r.videos_visited} vídeos sem thumb.\n${r.thumbnails_generated} gerados.\n${r.errors} erros.`,
+    );
+  } catch (e: any) {
+    alert("Erro: " + (e.response?.data?.detail ?? e.message));
+  } finally {
+    thumbsBusy.value = false;
+  }
+}
+
 async function runDedupe() {
   if (!confirm("Procurar e remover fotos duplicadas? Pode levar alguns minutos.")) return;
   dedupeBusy.value = true;
@@ -81,6 +98,9 @@ onMounted(load);
       <p class="muted">Visão geral do acervo e do reconhecimento facial.</p>
     </div>
     <div class="page-actions">
+      <button class="button secondary" :disabled="thumbsBusy" @click="runRegenThumbs">
+        {{ thumbsBusy ? "Gerando…" : "Gerar thumbs de vídeo" }}
+      </button>
       <button class="button secondary" :disabled="dedupeBusy" @click="runDedupe">
         {{ dedupeBusy ? "Procurando…" : "Remover duplicadas" }}
       </button>

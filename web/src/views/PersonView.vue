@@ -2,6 +2,7 @@
 import { onMounted, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
 import FaceThumb from "@/components/FaceThumb.vue";
+import MediaPreview from "@/components/MediaPreview.vue";
 import PersonPickerDialog from "@/components/PersonPickerDialog.vue";
 import {
   facesApi,
@@ -214,8 +215,14 @@ onMounted(load);
           :href="p.signed_url"
           target="_blank"
           rel="noopener"
+          class="photo-tile"
         >
-          <img :src="p.signed_url" loading="lazy" :alt="p.id" />
+          <MediaPreview
+            :src="p.signed_url"
+            :thumb-src="p.thumb_signed_url"
+            :media-type="p.media_type"
+            :alt="p.id"
+          />
         </a>
       </div>
     </template>
@@ -270,9 +277,12 @@ onMounted(load);
   grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
   gap: 0.5rem;
 }
-.photos-grid img {
-  width: 100%; aspect-ratio: 1/1; object-fit: cover;
-  border-radius: 8px; background: var(--surface-strong);
+.photo-tile {
+  display: block;
+  aspect-ratio: 1 / 1;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--surface-strong);
 }
 .small { font-size: 0.85rem; }
 

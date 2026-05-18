@@ -228,7 +228,7 @@ async def list_pending_by_target(_user: User = CurrentUser) -> list[TargetWithSu
         prows = await db.fetch(
             """
             select distinct on (f.person_id)
-              f.person_id, f.bbox, p.storage_bucket, p.storage_path
+              f.person_id, f.bbox, p.storage_bucket, p.storage_path, p.metadata
             from public.faces f
             join public.photos p on p.id = f.photo_id
             where f.person_id = any($1::uuid[])
@@ -237,9 +237,10 @@ async def list_pending_by_target(_user: User = CurrentUser) -> list[TargetWithSu
             person_ids,
         )
         for pr in prows:
+            meta = pr["metadata"] or {}
             person_thumbs[str(pr["person_id"])] = {
                 "bbox": _coerce_bbox(pr["bbox"]),
-                "url": storage_svc.signed_url(pr["storage_bucket"], pr["storage_path"]),
+                "url": storage_svc.thumb_signed_url(meta, pr["storage_bucket"], pr["storage_path"]),
             }
 
     # For each orphan face, get its bbox + photo
@@ -249,7 +250,7 @@ async def list_pending_by_target(_user: User = CurrentUser) -> list[TargetWithSu
         frows = await db.fetch(
             """
             select f.id, f.bbox, f.detection_score,
-                   p.storage_bucket, p.storage_path
+                   p.storage_bucket, p.storage_path, p.metadata
             from public.faces f
             join public.photos p on p.id = f.photo_id
             where f.id = any($1::uuid[])
@@ -257,9 +258,10 @@ async def list_pending_by_target(_user: User = CurrentUser) -> list[TargetWithSu
             face_ids,
         )
         for fr in frows:
+            meta = fr["metadata"] or {}
             face_thumbs[str(fr["id"])] = {
                 "bbox": _coerce_bbox(fr["bbox"]),
-                "url": storage_svc.signed_url(fr["storage_bucket"], fr["storage_path"]),
+                "url": storage_svc.thumb_signed_url(meta, fr["storage_bucket"], fr["storage_path"]),
             }
             face_scores[str(fr["id"])] = float(fr["detection_score"] or 0)
 
