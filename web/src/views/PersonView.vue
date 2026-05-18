@@ -132,7 +132,7 @@ onMounted(load);
 <template>
   <section class="card">
     <div class="back-row">
-      <RouterLink to="/admin" class="muted">← Voltar pra Admin</RouterLink>
+      <RouterLink to="/admin/pessoas" class="muted">← Voltar pra Pessoas</RouterLink>
     </div>
 
     <p v-if="loading" class="muted">Carregando…</p>
