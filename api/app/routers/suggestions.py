@@ -376,7 +376,8 @@ async def approve(suggestion_id: UUID, body: ApproveRequest | None = None, user:
             person_id,
         )
 
-    # Resolve this and all sibling suggestions (same target + same normalized_name).
+    # 1) Approve siblings with same target + same normalized_name (people
+    #    who suggested the same name independently).
     await db.execute(
         """
         update public.name_suggestions
@@ -390,6 +391,23 @@ async def approve(suggestion_id: UUID, body: ApproveRequest | None = None, user:
         """,
         UUID(user.id),
         sugg["normalized_name"],
+        person_id if sugg["person_id"] is not None else None,
+        sugg["face_id"],
+    )
+
+    # 2) Auto-reject every other pending suggestion for the same target
+    #    (competing names lose once one is approved).
+    await db.execute(
+        """
+        update public.name_suggestions
+           set status = 'rejected',
+               resolved_at = now(),
+               resolved_by = $1
+         where status = 'pending'
+           and ( (person_id = $2 and $2 is not null) or
+                 (face_id   = $3 and $3 is not null) )
+        """,
+        UUID(user.id),
         person_id if sugg["person_id"] is not None else None,
         sugg["face_id"],
     )
