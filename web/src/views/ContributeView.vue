@@ -10,9 +10,11 @@ import {
   type Face,
   type Person,
 } from "@/services/api";
+import { useProfileStore } from "@/stores/profile";
 
 type Mode = "people" | "faces";
 const mode = ref<Mode>("people");
+const profileStore = useProfileStore();
 
 const anonymousPeople = ref<Array<Person & { thumb?: Face | null }>>([]);
 const orphanFaces = ref<Face[]>([]);
@@ -159,9 +161,18 @@ function clearFilters() {
   klass.value = "";
 }
 
-watch([year, klass], load);
-
 onMounted(async () => {
+  // Pre-fill filters from the user's own graduation year/class. They can
+  // still clear or change them — but the default is "show people from MY
+  // turma" since that's who the contributor is most likely to recognize.
+  await profileStore.load();
+  const p = profileStore.profile;
+  if (p?.graduation_year) year.value = p.graduation_year;
+  if (p?.class_letter) klass.value = p.class_letter;
+
+  // Attach the watcher AFTER seeding so we don't trigger an extra load.
+  watch([year, klass], load);
+
   await Promise.all([loadFilters(), load()]);
 });
 </script>
