@@ -17,7 +17,6 @@ const error = ref<string | null>(null);
 
 // Reveal phase: drip photos one at a time
 const revealIdx = ref(0);
-const revealComplete = ref(false);
 let revealTimer: number | null = null;
 const PHOTO_REVEAL_MS = 4000;       // how long each photo stays on screen
 const MAX_REVEAL_PHOTOS = 12;       // cap reveal duration; rest goes to grid
@@ -47,6 +46,28 @@ const currentSongTitle = ref<string>("");
 const result = ref<SearchResponse | null>(null);
 const totalSteps = 4; // pseudo progress
 const progressStep = ref(0);
+
+// Lightbox (in-app modal for the results grid)
+const lightboxIdx = ref<number | null>(null);
+function openLightbox(idx: number) {
+  lightboxIdx.value = idx;
+}
+function closeLightbox() {
+  lightboxIdx.value = null;
+}
+
+// Keyboard navigation for the lightbox
+function onLightboxKey(e: KeyboardEvent) {
+  if (lightboxIdx.value === null) return;
+  const total = result.value?.photos.length ?? 0;
+  if (e.key === "Escape") {
+    closeLightbox();
+  } else if (e.key === "ArrowRight" && lightboxIdx.value < total - 1) {
+    lightboxIdx.value++;
+  } else if (e.key === "ArrowLeft" && lightboxIdx.value > 0) {
+    lightboxIdx.value--;
+  }
+}
 
 const SEARCH_DURATION_MS = 8000; // animação dura ~8s antes de mostrar resultado
 
@@ -213,44 +234,44 @@ async function startJourney() {
 }
 
 function startReveal() {
+  // Tear down any prior reveal cleanly
+  stopReveal();
+
   phase.value = "reveal";
   revealIdx.value = 0;
-  revealComplete.value = false;
 
   const total = Math.min(result.value?.photos.length ?? 0, MAX_REVEAL_PHOTOS);
-  if (revealTimer) window.clearInterval(revealTimer);
-  revealTimer = window.setInterval(() => {
-    if (revealIdx.value >= total - 1) {
-      // Last photo shown — wait one more PHOTO_REVEAL_MS then go to grid.
-      if (revealTimer) window.clearInterval(revealTimer);
-      revealTimer = window.setTimeout(() => {
-        revealComplete.value = true;
-        phase.value = "results";
-      }, PHOTO_REVEAL_MS) as unknown as number;
-      return;
+  if (total === 0) {
+    phase.value = "results";
+    return;
+  }
+
+  // Schedule a single timeout that drips one photo at a time. Recursive
+  // setTimeout (NOT setInterval) so timer handles never get confused.
+  const tick = () => {
+    revealTimer = null;
+    if (phase.value !== "reveal") return;          // already exited
+    if (revealIdx.value < total - 1) {
+      revealIdx.value += 1;
+      revealTimer = window.setTimeout(tick, PHOTO_REVEAL_MS);
+    } else {
+      // Held the last photo for PHOTO_REVEAL_MS; now flip to grid.
+      phase.value = "results";
     }
-    revealIdx.value += 1;
-  }, PHOTO_REVEAL_MS);
+  };
+  revealTimer = window.setTimeout(tick, PHOTO_REVEAL_MS);
 }
 
 function skipReveal() {
-  if (revealTimer) {
-    window.clearInterval(revealTimer);
-    window.clearTimeout(revealTimer);
-    revealTimer = null;
-  }
-  revealComplete.value = true;
+  stopReveal();
   phase.value = "results";
 }
 
 function stopReveal() {
-  if (revealTimer) {
-    window.clearInterval(revealTimer);
+  if (revealTimer !== null) {
     window.clearTimeout(revealTimer);
     revealTimer = null;
   }
-  revealIdx.value = 0;
-  revealComplete.value = false;
 }
 
 const currentRevealPhoto = computed(() => {
@@ -305,9 +326,11 @@ const progressPct = computed(() => Math.round((progressStep.value / totalSteps) 
 onMounted(() => {
   // Nothing to bootstrap — page is public. Camera prompt happens on user
   // click (browser blocks getUserMedia without a gesture anyway).
+  window.addEventListener("keydown", onLightboxKey);
 });
 
 onBeforeUnmount(() => {
+  window.removeEventListener("keydown", onLightboxKey);
   stopCamera();
   stopMusic();
   stopSlideshow();
@@ -447,21 +470,64 @@ onBeforeUnmount(() => {
         </div>
 
         <div v-if="result?.photos.length" class="results-grid">
-          <a
-            v-for="p in result.photos.slice(0, 30)"
+          <button
+            v-for="(p, idx) in result.photos.slice(0, 30)"
             :key="p.photo_id"
-            :href="p.signed_url"
-            target="_blank"
-            rel="noopener"
+            type="button"
             class="result-tile"
+            @click="openLightbox(idx)"
           >
             <img :src="p.thumb_signed_url || p.signed_url" alt="" loading="lazy" />
             <span v-if="p.media_type === 'video'" class="video-pill">▶ vídeo</span>
-          </a>
+          </button>
         </div>
 
         <button class="big-cta secondary" type="button" @click="reset">Procurar de novo</button>
       </section>
+    </transition>
+
+    <!-- LIGHTBOX (in-app modal for full-size view) -->
+    <transition name="fade">
+      <div
+        v-if="lightboxIdx !== null && result"
+        class="lightbox"
+        role="dialog"
+        aria-modal="true"
+        @click.self="closeLightbox"
+      >
+        <button class="lightbox-close" aria-label="Fechar" @click="closeLightbox">×</button>
+        <button
+          v-if="lightboxIdx > 0"
+          class="lightbox-nav prev"
+          aria-label="Anterior"
+          @click="lightboxIdx = (lightboxIdx ?? 0) - 1"
+        >‹</button>
+        <button
+          v-if="lightboxIdx < result.photos.length - 1"
+          class="lightbox-nav next"
+          aria-label="Próxima"
+          @click="lightboxIdx = (lightboxIdx ?? 0) + 1"
+        >›</button>
+
+        <div class="lightbox-media">
+          <video
+            v-if="result.photos[lightboxIdx].media_type === 'video'"
+            :src="result.photos[lightboxIdx].signed_url"
+            controls
+            autoplay
+            playsinline
+          />
+          <img
+            v-else
+            :src="result.photos[lightboxIdx].signed_url"
+            alt=""
+          />
+        </div>
+
+        <p class="lightbox-counter">
+          {{ lightboxIdx + 1 }} / {{ result.photos.length }}
+        </p>
+      </div>
     </transition>
   </div>
 </template>
@@ -801,9 +867,16 @@ onBeforeUnmount(() => {
   overflow: hidden;
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
-  transition: transform 0.2s;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  transition: transform 0.2s, border-color 0.15s;
 }
-.result-tile:hover { transform: scale(1.04); }
+.result-tile:hover {
+  transform: scale(1.04);
+  border-color: rgba(247, 201, 72, 0.5);
+}
 .result-tile img {
   width: 100%; height: 100%; object-fit: cover;
   display: block;
@@ -825,6 +898,87 @@ onBeforeUnmount(() => {
 .fade-enter-from, .fade-leave-to { opacity: 0; }
 
 .error { color: var(--marista-yellow); margin-top: 1rem; font-weight: 600; }
+
+/* ----- LIGHTBOX ----- */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(0, 0, 0, 0.92);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4vh 4vw;
+}
+.lightbox-media {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.lightbox-media img,
+.lightbox-media video {
+  max-width: 100%;
+  max-height: 100%;
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+.lightbox-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--marista-white);
+  cursor: pointer;
+  font-size: 1.5rem;
+  font-weight: 300;
+  z-index: 60;
+  transition: background 0.15s;
+}
+.lightbox-close:hover { background: rgba(255, 255, 255, 0.2); }
+.lightbox-nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: var(--marista-white);
+  cursor: pointer;
+  font-size: 2.2rem;
+  font-weight: 300;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  padding-bottom: 4px;
+  transition: background 0.15s;
+}
+.lightbox-nav:hover { background: rgba(255, 255, 255, 0.2); }
+.lightbox-nav.prev { left: 1rem; }
+.lightbox-nav.next { right: 1rem; }
+.lightbox-counter {
+  position: absolute;
+  bottom: 1.2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0, 0, 0, 0.6);
+  color: var(--marista-yellow);
+  padding: 0.4rem 1rem;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  letter-spacing: 0.04em;
+  margin: 0;
+}
 
 /* Tiny exit button — discreet, top-right corner */
 .kiosk-exit {
