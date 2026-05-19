@@ -902,16 +902,13 @@ const previousPhoto = computed(
 
 const progressPct = computed(() => Math.round((progressStep.value / totalSteps) * 100));
 
-// Show the QR-code card on the hero and screensaver — phases where the
-// user is reading the screen and might be drawn to scan it on their phone
-// to add photos themselves. Hidden during the active journey to avoid
-// visual clutter over the slideshow / reveal / results.
+// Show the QR-code card only on the hero. The screensaver was getting
+// visually noisy with the QR competing with the photo slideshow.
 const showQrCard = computed(
   () =>
     phase.value === "idle" ||
     phase.value === "ready" ||
-    phase.value === "loading-camera" ||
-    phase.value === "screensaver",
+    phase.value === "loading-camera",
 );
 
 // ---- Init ----
