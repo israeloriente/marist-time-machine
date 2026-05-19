@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .. import db
-from ..deps import RequireAdmin, User
+from ..deps import CurrentUser, RequireAdmin, User
 from ..services import storage as storage_svc
 
 router = APIRouter(prefix="/faces", tags=["faces"])
@@ -52,7 +52,7 @@ async def list_unassigned(
     limit: int = 100,
     offset: int = 0,
     min_score: float = 0.0,
-    _user: User = RequireAdmin,
+    _user: User = CurrentUser,
 ) -> list[FaceOut]:
     """List faces that don't belong to any person yet.
 
