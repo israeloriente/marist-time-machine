@@ -82,9 +82,12 @@ services:
       # Provision the OAuth Client ID at https://console.cloud.google.com/
       # apis/credentials (type "Web application"). Authorized redirect URI
       # must be:  ${API_EXTERNAL_URL}/auth/v1/callback
-      GOTRUE_EXTERNAL_GOOGLE_ENABLED: ${GOTRUE_EXTERNAL_GOOGLE_ENABLED:-true}
-      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID}
-      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOTRUE_EXTERNAL_GOOGLE_SECRET}
+      # Hardcoded true — provider stays enabled only if CLIENT_ID + SECRET
+      # are non-empty. If you get "provider not enabled", the env vars
+      # below are missing in the runtime (check Coolify env scope).
+      GOTRUE_EXTERNAL_GOOGLE_ENABLED: "true"
+      GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID: ${GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID:?GOTRUE_EXTERNAL_GOOGLE_CLIENT_ID is required}
+      GOTRUE_EXTERNAL_GOOGLE_SECRET: ${GOTRUE_EXTERNAL_GOOGLE_SECRET:?GOTRUE_EXTERNAL_GOOGLE_SECRET is required}
       GOTRUE_EXTERNAL_GOOGLE_REDIRECT_URI: ${API_EXTERNAL_URL}/auth/v1/callback
 
   # -------------------------------------------------------------------
