@@ -1,6 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import QrCode from "@/components/QrCode.vue";
 import ReportDialog from "@/components/ReportDialog.vue";
+
+const APP_URL = "https://app-marista.israeloriente.com/";
 import {
   randomPhotos,
   searchByFace,
@@ -899,6 +902,18 @@ const previousPhoto = computed(
 
 const progressPct = computed(() => Math.round((progressStep.value / totalSteps) * 100));
 
+// Show the QR-code card on the hero and screensaver — phases where the
+// user is reading the screen and might be drawn to scan it on their phone
+// to add photos themselves. Hidden during the active journey to avoid
+// visual clutter over the slideshow / reveal / results.
+const showQrCard = computed(
+  () =>
+    phase.value === "idle" ||
+    phase.value === "ready" ||
+    phase.value === "loading-camera" ||
+    phase.value === "screensaver",
+);
+
 // ---- Init ----
 
 // Any of these wakes the screensaver / refreshes the idle timer.
@@ -1281,6 +1296,18 @@ onBeforeUnmount(() => {
       :thumb-url="reportTarget?.thumb_url"
       @close="reportOpen = false"
     />
+
+    <!-- QR code: convida quem está olhando o kiosk a abrir o app no celular
+         pra contribuir com fotos. Aparece na hero e no screensaver. -->
+    <Transition name="qr-fade">
+      <aside v-if="showQrCard" class="qr-card" aria-label="QR code para abrir o app no celular">
+        <QrCode :value="APP_URL" :size="120" />
+        <div class="qr-text">
+          <strong>Quer compartilhar fotos?</strong>
+          <span>Aponte a câmera do seu celular</span>
+        </div>
+      </aside>
+    </Transition>
   </div>
 </template>
 
@@ -1385,6 +1412,64 @@ onBeforeUnmount(() => {
   color: var(--marista-navy);
   border-color: var(--marista-yellow);
   transform: scale(1.05);
+}
+
+/* ----- QR card (canto inferior direito da hero/screensaver) ----- */
+.qr-card {
+  position: fixed;
+  right: clamp(0.75rem, 2vw, 1.5rem);
+  bottom: clamp(0.75rem, 2vw, 1.5rem);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.85rem;
+  background: rgba(255, 255, 255, 0.97);
+  color: var(--marista-navy);
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  max-width: 360px;
+  pointer-events: none; /* puramente informativo, não rouba clique do screensaver */
+}
+.qr-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+.qr-text strong {
+  font-weight: 800;
+  font-size: 0.95rem;
+  color: var(--marista-navy);
+}
+.qr-text span {
+  color: #4a5b73;
+}
+
+.qr-fade-enter-active, .qr-fade-leave-active {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+.qr-fade-enter-from, .qr-fade-leave-to {
+  opacity: 0;
+  transform: translateY(10px) scale(0.96);
+}
+
+/* Telas estreitas: card menor, texto mais curto */
+@media (max-width: 520px) {
+  .qr-card {
+    max-width: 200px;
+    padding: 0.6rem;
+    gap: 0.6rem;
+  }
+  .qr-card :deep(.qr) {
+    width: 88px !important;
+    height: 88px !important;
+  }
+  .qr-text {
+    font-size: 0.78rem;
+  }
+  .qr-text strong { font-size: 0.85rem; }
 }
 
 .audio-unlock {

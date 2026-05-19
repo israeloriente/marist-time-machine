@@ -142,7 +142,7 @@ onMounted(async () => {
           </svg>
         </span>
         <strong>Trilha sonora</strong>
-        <span class="action-desc">Músicas que marcaram a sua turma.</span>
+        <span class="action-desc">Músicas do toque que marcaram a sua vida.</span>
       </RouterLink>
     </div>
   </section>
