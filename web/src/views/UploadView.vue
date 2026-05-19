@@ -1,6 +1,10 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { onBeforeRouteLeave } from "vue-router";
 import { uploadPhoto } from "@/services/api";
+import { useNotifyStore } from "@/stores/notify";
+
+const notify = useNotifyStore();
 
 type Status = "pending" | "uploading" | "processing" | "done" | "duplicate" | "error";
 
@@ -287,12 +291,73 @@ function cancelAll() {
   }
 }
 
+// ---- Guard contra sair da página enquanto o upload está rodando ----
+
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (!busy.value) return;
+  // O texto custom é ignorado pelos browsers modernos, mas a presença
+  // de preventDefault + returnValue força o "Tem certeza que deseja sair?".
+  e.preventDefault();
+  e.returnValue = "";
+}
+
+watch(busy, (running) => {
+  if (running) {
+    window.addEventListener("beforeunload", onBeforeUnload);
+  } else {
+    window.removeEventListener("beforeunload", onBeforeUnload);
+  }
+});
+
+onMounted(() => {
+  // Caso a página recarregue com busy=true (não acontece com nossa lógica,
+  // mas é defensivo): garante que o listener esteja registrado.
+  if (busy.value) window.addEventListener("beforeunload", onBeforeUnload);
+});
+
+onBeforeRouteLeave(async (_to, _from) => {
+  if (!busy.value) return true;
+  const proceed = await notify.confirm({
+    title: "Upload em andamento",
+    message:
+      "Tem arquivos sendo enviados agora. Se você sair, o envio é cancelado e os arquivos não chegam no acervo. Tem certeza que quer sair?",
+    confirmLabel: "Sair mesmo assim",
+    cancelLabel: "Continuar enviando",
+    variant: "danger",
+  });
+  if (proceed) {
+    // Cancela os inflight para não deixar requests pendurados.
+    cancelAll();
+  }
+  return proceed;
+});
+
 onBeforeUnmount(() => {
+  window.removeEventListener("beforeunload", onBeforeUnload);
   for (const q of queue.value) freePreview(q);
 });
 </script>
 
 <template>
+  <!-- Banner sticky enquanto o upload roda. Avisa pra não sair, fechar a aba
+       e nem trocar de página antes de terminar. -->
+  <Transition name="busy-fade">
+    <div v-if="busy" class="busy-banner" role="alert">
+      <span class="busy-icon" aria-hidden="true">
+        <span class="busy-dot" />
+      </span>
+      <div class="busy-text">
+        <strong>Envio em andamento — não saia da página.</strong>
+        <span>
+          Fechar a aba, voltar ou recarregar cancela o envio dos arquivos
+          que ainda estão sendo processados ({{ tally.active }} ativo<template
+            v-if="tally.active !== 1"
+          >s</template>, {{ tally.pending }} aguardando).
+        </span>
+      </div>
+    </div>
+  </Transition>
+
   <section class="card">
     <h2>Adicionar ao acervo</h2>
     <p class="muted hide-on-mobile">
@@ -479,6 +544,60 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* Aviso de upload em andamento — sticky no topo da view */
+.busy-banner {
+  position: sticky;
+  top: calc(0.5rem + var(--safe-top));
+  z-index: 20;
+  margin: 0 0 1rem;
+  padding: 0.75rem 1rem;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.7rem;
+  background: linear-gradient(135deg, #c4860e 0%, #a06d05 100%);
+  color: white;
+  border-radius: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: 0 8px 24px rgba(196, 134, 14, 0.35);
+  line-height: 1.4;
+}
+.busy-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.18);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  margin-top: 0.1rem;
+}
+.busy-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: white;
+  animation: busy-pulse 1.2s ease-in-out infinite;
+}
+@keyframes busy-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(1.25); }
+}
+.busy-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  font-size: 0.88rem;
+}
+.busy-text strong { font-weight: 800; font-size: 0.95rem; }
+.busy-text span { opacity: 0.92; }
+
+.busy-fade-enter-active, .busy-fade-leave-active {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.busy-fade-enter-from { opacity: 0; transform: translateY(-8px); }
+.busy-fade-leave-to { opacity: 0; transform: translateY(-8px); }
+
 .card { padding: 1rem; }
 
 .form-grid {
