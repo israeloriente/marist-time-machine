@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import ReportDialog from "@/components/ReportDialog.vue";
 import {
   randomPhotos,
   searchByFace,
@@ -8,6 +9,11 @@ import {
   type SearchResponse,
   type Song,
 } from "@/services/api";
+import { useAuthStore } from "@/stores/auth";
+import { useNotifyStore } from "@/stores/notify";
+
+const auth = useAuthStore();
+const notify = useNotifyStore();
 
 type Phase =
   | "idle"
@@ -73,15 +79,36 @@ function closeLightbox() {
   lightboxIdx.value = null;
 }
 
+// ----- Report (denúncia) -----
+const reportOpen = ref(false);
+const reportTarget = ref<{ photo_id: string; thumb_url: string } | null>(null);
+
+function openReportFromLightbox() {
+  if (lightboxIdx.value === null) return;
+  const item = lightboxList.value[lightboxIdx.value];
+  if (!item || !item.photo_id) return;
+  if (!auth.session) {
+    notify.toast("Faça login para poder denunciar.", "warning");
+    return;
+  }
+  reportTarget.value = {
+    photo_id: item.photo_id,
+    thumb_url: item.thumb_signed_url || item.signed_url,
+  };
+  reportOpen.value = true;
+}
+
 const lightboxList = computed(() => {
   if (lightboxSource.value === "year") {
     return yearPhotos.value.map((p) => ({
+      photo_id: p.id,
       signed_url: p.signed_url,
       thumb_signed_url: p.thumb_signed_url,
       media_type: "image" as const,
     }));
   }
   return (result.value?.photos ?? []).map((p) => ({
+    photo_id: p.photo_id,
     signed_url: p.signed_url,
     thumb_signed_url: p.thumb_signed_url,
     media_type: p.media_type,
@@ -877,8 +904,25 @@ onBeforeUnmount(() => {
         <p class="lightbox-counter">
           {{ lightboxIdx + 1 }} / {{ lightboxList.length }}
         </p>
+
+        <button
+          v-if="auth.session"
+          class="lightbox-report"
+          type="button"
+          aria-label="Denunciar esta mídia"
+          @click="openReportFromLightbox"
+        >
+          🚩 Denunciar
+        </button>
       </div>
     </transition>
+
+    <ReportDialog
+      :open="reportOpen"
+      :photo-id="reportTarget?.photo_id"
+      :thumb-url="reportTarget?.thumb_url"
+      @close="reportOpen = false"
+    />
   </div>
 </template>
 
@@ -1383,6 +1427,27 @@ onBeforeUnmount(() => {
 .lightbox-nav:hover { background: rgba(255, 255, 255, 0.2); }
 .lightbox-nav.prev { left: 1rem; }
 .lightbox-nav.next { right: 1rem; }
+.lightbox-report {
+  position: absolute;
+  top: 1rem;
+  left: 1rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.95rem;
+  border-radius: 999px;
+  background: rgba(214, 58, 58, 0.7);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  z-index: 60;
+  transition: background 0.15s;
+}
+.lightbox-report:hover { background: rgba(214, 58, 58, 0.9); }
+
 .lightbox-counter {
   position: absolute;
   bottom: 1.2rem;

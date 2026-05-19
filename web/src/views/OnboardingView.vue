@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { useRoute, useRouter } from "vue-router";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import { useProfileStore } from "@/stores/profile";
 
 const router = useRouter();
@@ -13,17 +13,24 @@ const classes = ["A", "B", "C", "D", "E", "F"];
 
 const year = ref<number | "">("");
 const klass = ref<string>("");
+const acceptedTerms = ref(false);
 const saving = ref(false);
 const error = ref<string | null>(null);
 
-const canSubmit = computed(() => year.value !== "" && klass.value !== "" && !saving.value);
+const canSubmit = computed(
+  () =>
+    year.value !== "" &&
+    klass.value !== "" &&
+    acceptedTerms.value &&
+    !saving.value,
+);
 
 async function submit() {
   if (!canSubmit.value) return;
   saving.value = true;
   error.value = null;
   try {
-    await profileStore.save(year.value as number, klass.value);
+    await profileStore.save(year.value as number, klass.value, true);
     const redirect = (route.query.redirect as string) || "/";
     router.push(redirect);
   } catch (e: any) {
@@ -35,10 +42,14 @@ async function submit() {
 
 onMounted(async () => {
   await profileStore.load();
-  // If user already has profile, send away.
-  if (profileStore.profile) {
+  // If user already has profile AND already accepted current terms, send away.
+  if (profileStore.profile?.terms_accepted_at) {
     const redirect = (route.query.redirect as string) || "/";
     router.replace(redirect);
+  } else if (profileStore.profile) {
+    // Pre-fill year/class if user existed pre-terms (was created before this feature)
+    year.value = profileStore.profile.graduation_year;
+    klass.value = profileStore.profile.class_letter;
   }
 });
 </script>
@@ -64,6 +75,17 @@ onMounted(async () => {
           <option value="" disabled>Selecione</option>
           <option v-for="c in classes" :key="c" :value="c">{{ c }}</option>
         </select>
+      </label>
+
+      <label class="terms-check">
+        <input v-model="acceptedTerms" type="checkbox" />
+        <span>
+          Li e aceito os
+          <RouterLink to="/termos" target="_blank" class="terms-link">
+            Termos de Uso e a Política de Privacidade
+          </RouterLink>.
+          Sou responsável pelas mídias que envio.
+        </span>
       </label>
 
       <p v-if="error" class="error">{{ error }}</p>
@@ -104,6 +126,33 @@ onMounted(async () => {
   font-size: 0.9rem;
 }
 .form em { color: var(--marista-yellow); font-style: normal; }
+
+.terms-check {
+  flex-direction: row !important;
+  align-items: flex-start;
+  gap: 0.6rem !important;
+  padding: 0.75rem 0.9rem;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  color: var(--muted-on-dark);
+  line-height: 1.5;
+  font-size: 0.85rem;
+}
+.terms-check input {
+  margin-top: 0.2rem;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--marista-yellow);
+  flex-shrink: 0;
+}
+.terms-link {
+  color: var(--marista-yellow);
+  text-decoration: underline;
+  font-weight: 600;
+}
+
 .error { color: var(--marista-yellow); font-weight: 600; margin: 0; }
 .button { margin-top: 0.4rem; }
+.button:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>

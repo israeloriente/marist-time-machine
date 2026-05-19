@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from .. import db
 from ..deps import CurrentUser, RequireAdmin, User
 from ..services import media, storage, video
+from ..services.terms import require_terms_accepted
 from ..services.clustering import assign_face_to_person
 from ..services.ml_client import ml_client
 
@@ -48,6 +49,7 @@ async def upload_photo(
 
     Videos: a single representative frame is extracted via ffmpeg (mirrors Immich).
     """
+    await require_terms_accepted(user)
     ctype = (file.content_type or "").lower()
     is_video = ctype.startswith("video/")
     is_image = ctype.startswith("image/")

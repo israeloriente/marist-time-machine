@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from . import scheduler
 from .config import settings
 from .db import close_pool, get_pool
-from .routers import faces, me, people, photos, search, songs, suggestions
+from .routers import faces, me, people, photos, reports, search, songs, suggestions
 
 
 @asynccontextmanager
@@ -35,6 +35,7 @@ app.include_router(search.router)
 app.include_router(suggestions.router)
 app.include_router(me.router)
 app.include_router(songs.router)
+app.include_router(reports.router)
 
 
 @app.get("/health")

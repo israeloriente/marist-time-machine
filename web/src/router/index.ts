@@ -7,6 +7,7 @@ export const router = createRouter({
   routes: [
     { path: "/", name: "home", component: () => import("@/views/HomeView.vue") },
     { path: "/login", name: "login", component: () => import("@/views/LoginView.vue") },
+    { path: "/termos", name: "terms", component: () => import("@/views/TermsView.vue") },
     {
       path: "/kiosk",
       name: "kiosk",
@@ -87,6 +88,11 @@ export const router = createRouter({
           component: () => import("@/views/admin/AdminSongsView.vue"),
         },
         {
+          path: "denuncias",
+          name: "admin-reports",
+          component: () => import("@/views/admin/AdminReportsView.vue"),
+        },
+        {
           path: "sugestoes",
           name: "admin-suggestions",
           component: () => import("@/views/admin/AdminSuggestionsView.vue"),
@@ -124,12 +130,14 @@ router.beforeEach(async (to) => {
     return { name: "home" };
   }
 
-  // Profile gate: authenticated users without a saved profile go to /onboarding.
-  // Routes can opt out via meta.skipProfileCheck (the onboarding page itself).
+  // Profile + terms gate: authenticated users without a saved profile (or
+  // without an accepted-terms timestamp) get bounced to /onboarding to fill
+  // and accept. Routes opt out via meta.skipProfileCheck.
   if (auth.session && to.meta.requiresAuth && !to.meta.skipProfileCheck) {
     const profile = useProfileStore();
     await profile.load();
-    if (!profile.profile) {
+    const p = profile.profile;
+    if (!p || !p.terms_accepted_at) {
       return { name: "onboarding", query: { redirect: to.fullPath } };
     }
   }

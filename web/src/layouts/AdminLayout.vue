@@ -9,6 +9,7 @@ import {
   facesApi,
   moderationApi,
   songsModerationApi,
+  reportsApi,
 } from "@/services/api";
 
 const auth = useAuthStore();
@@ -27,22 +28,38 @@ const counts = ref({
   suggestions: 0,
   pendingPhotos: 0,
   pendingSongs: 0,
+  pendingReports: 0,
 });
 
 async function refreshCounts() {
   try {
-    const [stats, list, faces, modCounts, songCounts] = await Promise.all([
-      peopleApi.stats().catch(() => null),
-      suggestionsApi.pendingByTarget().catch(() => []),
-      facesApi.unassigned(1, 0, 0.5).catch(() => []),
-      moderationApi.counts().catch(() => ({ pending: 0, approved: 0, rejected: 0 })),
-      songsModerationApi.counts().catch(() => ({ pending: 0, approved: 0, rejected: 0 })),
-    ]);
+    const [stats, list, faces, modCounts, songCounts, reportCounts] =
+      await Promise.all([
+        peopleApi.stats().catch(() => null),
+        suggestionsApi.pendingByTarget().catch(() => []),
+        facesApi.unassigned(1, 0, 0.5).catch(() => []),
+        moderationApi.counts().catch(() => ({
+          pending: 0,
+          approved: 0,
+          rejected: 0,
+        })),
+        songsModerationApi.counts().catch(() => ({
+          pending: 0,
+          approved: 0,
+          rejected: 0,
+        })),
+        reportsApi.counts().catch(() => ({
+          pending: 0,
+          resolved_removed: 0,
+          resolved_rejected: 0,
+        })),
+      ]);
     if (stats) counts.value.people = stats.people;
     counts.value.suggestions = list.length;
     if (stats) counts.value.unassigned = Math.max(0, stats.faces_total - stats.faces_clustered);
     counts.value.pendingPhotos = modCounts.pending;
     counts.value.pendingSongs = songCounts.pending;
+    counts.value.pendingReports = reportCounts.pending;
     void faces;
   } catch {
     /* silent */
@@ -120,6 +137,11 @@ const userInitial = computed(() => userEmail.value.slice(0, 1).toUpperCase());
           <span class="icon">🏷️</span>
           <span>Sugestões</span>
           <span v-if="counts.suggestions" class="count badge-yellow">{{ counts.suggestions }}</span>
+        </RouterLink>
+        <RouterLink to="/admin/denuncias" class="nav-item">
+          <span class="icon">🚩</span>
+          <span>Denúncias</span>
+          <span v-if="counts.pendingReports" class="count badge-yellow">{{ counts.pendingReports }}</span>
         </RouterLink>
 
         <div class="nav-section">Sistema</div>

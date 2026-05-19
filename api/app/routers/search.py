@@ -18,6 +18,7 @@ from ..config import settings
 from ..deps import OptionalUser, User
 from ..services import storage
 from ..services.ml_client import ml_client
+from ..services.terms import require_terms_accepted
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/search", tags=["search"])
@@ -48,6 +49,10 @@ async def search_by_face(
 ) -> SearchResponse:
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=415, detail="must be an image")
+    # Anonymous (kiosk) requests skip terms check — kiosk has its own
+    # public-display consent context. Authenticated app users must accept.
+    if user is not None:
+        await require_terms_accepted(user)
     payload = await file.read()
     faces = await ml_client().analyze(payload, file.filename or "query.jpg")
     if not faces:

@@ -28,8 +28,16 @@ export const useProfileStore = defineStore("profile", () => {
     }
   }
 
-  async function save(graduationYear: number, classLetter: string) {
-    profile.value = await meApi.saveProfile(graduationYear, classLetter);
+  async function save(
+    graduationYear: number,
+    classLetter: string,
+    acceptTerms = false,
+  ) {
+    profile.value = await meApi.saveProfile(
+      graduationYear,
+      classLetter,
+      acceptTerms,
+    );
   }
 
   function clear() {

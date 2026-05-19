@@ -397,6 +397,8 @@ export interface UserProfile {
   user_id: string;
   graduation_year: number;
   class_letter: string;
+  terms_accepted_at: string | null;
+  terms_version: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -404,8 +406,83 @@ export interface UserProfile {
 export const meApi = {
   profile: async (): Promise<UserProfile | null> =>
     (await api.get<UserProfile | null>("/me/profile")).data,
-  saveProfile: async (graduation_year: number, class_letter: string): Promise<UserProfile> =>
-    (await api.put<UserProfile>("/me/profile", { graduation_year, class_letter })).data,
+  saveProfile: async (
+    graduation_year: number,
+    class_letter: string,
+    accept_terms = false,
+  ): Promise<UserProfile> =>
+    (
+      await api.put<UserProfile>("/me/profile", {
+        graduation_year,
+        class_letter,
+        accept_terms,
+      })
+    ).data,
+};
+
+// ---------- Reports (denúncia de mídia) ----------
+
+export interface Report {
+  id: string;
+  reporter_id: string | null;
+  reporter_email: string | null;
+  photo_id: string | null;
+  face_id: string | null;
+  reason: string;
+  contact_info: string | null;
+  status: "pending" | "resolved_removed" | "resolved_rejected";
+  resolution_note: string | null;
+  resolved_at: string | null;
+  resolved_by: string | null;
+  created_at: string;
+  photo_signed_url: string | null;
+  photo_thumb_signed_url: string | null;
+  uploader_email: string | null;
+}
+
+export interface ReportCounts {
+  pending: number;
+  resolved_removed: number;
+  resolved_rejected: number;
+}
+
+export const reportsApi = {
+  create: async (input: {
+    photo_id?: string;
+    face_id?: string;
+    reason: string;
+    contact_info?: string;
+  }): Promise<Report> =>
+    (
+      await api.post<Report>("/reports", {
+        photo_id: input.photo_id ?? null,
+        face_id: input.face_id ?? null,
+        reason: input.reason,
+        contact_info: input.contact_info ?? null,
+      })
+    ).data,
+  mine: async (): Promise<Report[]> =>
+    (await api.get<Report[]>("/reports/mine")).data,
+  list: async (
+    status: "pending" | "resolved_removed" | "resolved_rejected" = "pending",
+    limit = 100,
+    offset = 0,
+  ): Promise<Report[]> =>
+    (await api.get<Report[]>("/reports", { params: { status, limit, offset } }))
+      .data,
+  counts: async (): Promise<ReportCounts> =>
+    (await api.get<ReportCounts>("/reports/counts")).data,
+  resolve: async (
+    id: string,
+    action: "remove" | "reject",
+    note?: string,
+  ): Promise<Report> =>
+    (
+      await api.post<Report>(`/reports/${id}/resolve`, {
+        action,
+        note: note ?? null,
+      })
+    ).data,
 };
 
 // ---------- Songs (trilha sonora) ----------
