@@ -89,6 +89,7 @@ async def search_by_face(
           join public.people p on p.id = f.person_id
           where f.person_id is not null
             and p.status = 'active'
+            and f.is_rejected = false
             and f.embedding <=> $1 <= $2
           order by distance asc
           limit 50
@@ -118,6 +119,7 @@ async def search_by_face(
             left join public.people pp on pp.id = f.person_id
             where p.moderation_status = 'approved'
               and (pp.status is null or pp.status = 'active')
+              and f.is_rejected = false
             order by distance asc
             limit $2
             """,

@@ -346,13 +346,25 @@ export const peopleApi = {
 };
 
 export const facesApi = {
-  unassigned: async (limit = 100, offset = 0, min_score = 0.5): Promise<Face[]> =>
-    (await api.get<Face[]>("/faces/unassigned", { params: { limit, offset, min_score } })).data,
+  unassigned: async (
+    limit = 100,
+    offset = 0,
+    min_score = 0.5,
+    rejected = false,
+  ): Promise<Face[]> =>
+    (
+      await api.get<Face[]>("/faces/unassigned", {
+        params: { limit, offset, min_score, rejected },
+      })
+    ).data,
   reassign: async (faceId: string, person_id: string | null): Promise<void> => {
     await api.patch(`/faces/${faceId}`, { person_id });
   },
   promote: async (faceId: string, display_name?: string): Promise<{ person_id: string }> =>
     (await api.post(`/faces/${faceId}/promote`, { display_name: display_name ?? null })).data,
+  reject: async (faceId: string, rejected: boolean): Promise<void> => {
+    await api.post(`/faces/${faceId}/reject`, { rejected });
+  },
 };
 
 // ---------- Name suggestions (crowd-sourced) ----------

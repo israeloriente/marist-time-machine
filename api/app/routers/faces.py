@@ -52,9 +52,13 @@ async def list_unassigned(
     limit: int = 100,
     offset: int = 0,
     min_score: float = 0.0,
+    rejected: bool = False,
     _user: User = CurrentUser,
 ) -> list[FaceOut]:
     """List faces that don't belong to any person yet.
+
+    By default returns the active queue (non-rejected). Pass rejected=true
+    to see the rejected ones (used by the admin to reactivate).
 
     For faces extracted from videos, signed_url is the thumbnail JPEG so
     the canvas-based FaceThumb can crop bbox region. The bbox coords are
@@ -69,12 +73,14 @@ async def list_unassigned(
         where f.person_id is null
           and coalesce(f.detection_score, 0) >= $3
           and p.moderation_status <> 'rejected'
+          and f.is_rejected = $4
         order by f.detection_score desc nulls last
         limit $1 offset $2
         """,
         limit,
         offset,
         min_score,
+        rejected,
     )
     return [
         FaceOut(
@@ -89,6 +95,48 @@ async def list_unassigned(
         )
         for r in rows
     ]
+
+
+class RejectRequest(BaseModel):
+    rejected: bool
+
+
+@router.post("/{face_id}/reject")
+async def reject_face(
+    face_id: UUID,
+    body: RejectRequest,
+    user: User = RequireAdmin,
+) -> dict:
+    """Marca um rosto detectado como rejeitado (não-pessoa, captura ruim,
+    objeto que virou rosto). Some da fila de "não atribuídos", do /contribute
+    e do /search por selfie. Reversível via rejected=false."""
+    if body.rejected:
+        result = await db.execute(
+            """
+            update public.faces
+               set is_rejected = true,
+                   rejected_at = now(),
+                   rejected_by = $1,
+                   person_id   = null
+             where id = $2
+            """,
+            UUID(user.id),
+            face_id,
+        )
+    else:
+        result = await db.execute(
+            """
+            update public.faces
+               set is_rejected = false,
+                   rejected_at = null,
+                   rejected_by = null
+             where id = $1
+            """,
+            face_id,
+        )
+    if result.endswith(" 0"):
+        raise HTTPException(status_code=404, detail="face not found")
+    return {"ok": True, "face_id": str(face_id), "is_rejected": body.rejected}
 
 
 @router.patch("/{face_id}")
