@@ -125,11 +125,12 @@ async function runConfirm() {
       if (a.ids.length === 1) await moderationApi.deleteForever(a.ids[0]);
       else await moderationApi.bulkDelete(a.ids);
     }
-    items.value = items.value.filter((i) => !a.ids.includes(i.id));
     selected.value = new Set();
-    await loadCounts();
     confirmOpen.value = false;
     confirmAction.value = null;
+    // Refetch a página atual em vez de só filtrar local — assim quando você
+    // processa o lote inteiro, a próxima leva de itens entra no lugar.
+    await Promise.all([loadCounts(), load()]);
   } catch (e) {
     notify.error("Erro ao processar", e);
   } finally {

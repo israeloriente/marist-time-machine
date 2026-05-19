@@ -54,11 +54,12 @@ async function resolve(report: Report, action: "remove" | "reject") {
   busy.value[report.id] = true;
   try {
     await reportsApi.resolve(report.id, action);
-    items.value = items.value.filter((r) => r.id !== report.id);
-    await loadCounts();
     notify.success(
       action === "remove" ? "Mídia removida." : "Denúncia rejeitada.",
     );
+    // Refetch em vez de só filtrar local — assim a próxima denúncia da
+    // fila entra no lugar quando você resolve a última visível.
+    await Promise.all([loadCounts(), load()]);
   } catch (e) {
     notify.error("Não foi possível resolver a denúncia", e);
   } finally {
