@@ -71,8 +71,13 @@ const HERO_DEFAULT_VIDEO_ID = "apksAnXSeIw";
 // fullscreen with a random photo mosaic + random song from any year.
 const SCREENSAVER_IDLE_MS = 60_000;
 const SCREENSAVER_PHOTO_INTERVAL_MS = 5000;
+const SCREENSAVER_DECODE_TIMEOUT_MS = 10_000;
 let inactivityTimer: number | null = null;
-let screensaverSlideTimer: number | null = null;
+let screensaverTimer: number | null = null;
+// True once the current screensaver photo has fully decoded (pixels ready).
+// While false, we keep showing the previous one (or the skeleton) instead
+// of flashing a partially-decoded image.
+const screensaverLoaded = ref(false);
 // True when the browser refused autoplay-with-sound and the user must
 // click a button to start playback.
 const audioBlocked = ref(false);
@@ -553,6 +558,27 @@ function decodeOne(p: PreloadablePhoto): Promise<boolean> {
   return promise;
 }
 
+/** Adapts a RandomPhoto (from /photos/random) to decodeOne's shape so the
+ *  same cache + img.decode() pipeline serves the screensaver too. */
+function decodePhoto(p: RandomPhoto): Promise<boolean> {
+  return decodeOne({
+    photo_id: p.id,
+    signed_url: p.signed_url,
+    thumb_signed_url: p.thumb_signed_url,
+  });
+}
+
+function waitForPhotoDecode(p: RandomPhoto, timeoutMs: number): Promise<boolean> {
+  return waitForDecode(
+    {
+      photo_id: p.id,
+      signed_url: p.signed_url,
+      thumb_signed_url: p.thumb_signed_url,
+    },
+    timeoutMs,
+  );
+}
+
 function preloadAllRevealPhotos(items: PreloadablePhoto[]): Promise<void> {
   // Kick off every decode in parallel; resolve when all settle OR the
   // overall budget elapses. The decodes keep going in the background
@@ -710,12 +736,59 @@ function isHeroPhase(p: Phase): boolean {
   return p === "idle" || p === "ready" || p === "loading-camera";
 }
 
+function clearScreensaverTimer() {
+  if (screensaverTimer !== null) {
+    window.clearTimeout(screensaverTimer);
+    screensaverTimer = null;
+  }
+}
+
+function primeScreensaverLookahead() {
+  // Kick off decode of the next 2 photos so by the time we advance,
+  // they're already painted in cache. Won't refire if already decoding.
+  for (let lookahead = 1; lookahead <= 2; lookahead++) {
+    const p = photos.value[(slideIdx.value + lookahead) % photos.value.length];
+    if (p) void decodePhoto(p);
+  }
+}
+
+async function advanceScreensaver() {
+  if (phase.value !== "screensaver") return;
+  if (!photos.value.length) return;
+
+  const nextIdx = (slideIdx.value + 1) % photos.value.length;
+  const next = photos.value[nextIdx];
+
+  screensaverLoaded.value = false;
+  const ok = await waitForPhotoDecode(next, SCREENSAVER_DECODE_TIMEOUT_MS);
+
+  // User might have exited during the wait
+  if (phase.value !== "screensaver") return;
+
+  if (!ok) {
+    // Failed to decode within budget — skip silently to the one after.
+    slideIdx.value = nextIdx;
+    primeScreensaverLookahead();
+    screensaverTimer = window.setTimeout(advanceScreensaver, 200);
+    return;
+  }
+
+  slideIdx.value = nextIdx;
+  screensaverLoaded.value = true;
+  primeScreensaverLookahead();
+  screensaverTimer = window.setTimeout(
+    advanceScreensaver,
+    SCREENSAVER_PHOTO_INTERVAL_MS,
+  );
+}
+
 async function enterScreensaver() {
   // Only enter from hero phases — guard against late timer firings after
   // the user already moved on to the journey.
   if (!isHeroPhase(phase.value)) return;
 
   phase.value = "screensaver";
+  screensaverLoaded.value = false;
 
   // Pool de fotos de TODOS os anos (sem filtro de year). Refresh every entry.
   try {
@@ -734,28 +807,33 @@ async function enterScreensaver() {
        whatever music's already playing. */
   }
 
-  // Cycle photos a bit faster than the running slideshow.
+  if (!photos.value.length) return; // nothing to show — wait for next attempt
+
+  // Decode the FIRST photo before painting it so we don't show a half-loaded
+  // image when the screensaver opens.
   slideIdx.value = 0;
-  if (screensaverSlideTimer) window.clearInterval(screensaverSlideTimer);
-  screensaverSlideTimer = window.setInterval(() => {
-    if (photos.value.length) {
-      slideIdx.value = (slideIdx.value + 1) % photos.value.length;
-    }
-  }, SCREENSAVER_PHOTO_INTERVAL_MS);
+  await waitForPhotoDecode(photos.value[0], SCREENSAVER_DECODE_TIMEOUT_MS);
+  if (phase.value !== "screensaver") return; // user exited during decode
+
+  screensaverLoaded.value = true;
+  primeScreensaverLookahead();
+  clearScreensaverTimer();
+  screensaverTimer = window.setTimeout(
+    advanceScreensaver,
+    SCREENSAVER_PHOTO_INTERVAL_MS,
+  );
 }
 
 function exitScreensaver() {
   if (phase.value !== "screensaver") return;
-  if (screensaverSlideTimer) {
-    window.clearInterval(screensaverSlideTimer);
-    screensaverSlideTimer = null;
-  }
+  clearScreensaverTimer();
   // Stop journey-specific song; the hero default takes over again.
   songs.value = [];
   currentSongIdx.value = 0;
   currentSongTitle.value = "";
   photos.value = [];
   slideIdx.value = 0;
+  screensaverLoaded.value = false;
   phase.value = "idle";
   playHeroMusic();
   scheduleInactivityCheck();
@@ -851,7 +929,7 @@ onBeforeUnmount(() => {
     window.removeEventListener(ev, onUserActivity);
   }
   clearInactivityTimer();
-  if (screensaverSlideTimer) window.clearInterval(screensaverSlideTimer);
+  clearScreensaverTimer();
   stopCamera();
   stopMusic();
   stopSlideshow();
@@ -939,7 +1017,7 @@ onBeforeUnmount(() => {
       >
         <transition-group name="cross" tag="div" class="slide-stack">
           <div
-            v-if="currentPhoto"
+            v-if="currentPhoto && screensaverLoaded"
             :key="currentPhoto.id"
             class="slide-frame ken-burns"
           >
@@ -947,9 +1025,21 @@ onBeforeUnmount(() => {
               class="slide-bg"
               :style="{ backgroundImage: `url(${currentPhoto.signed_url})` }"
             />
-            <img :src="currentPhoto.signed_url" class="slide-fg" alt="" />
+            <img
+              :src="currentPhoto.signed_url"
+              class="slide-fg"
+              alt=""
+              decoding="sync"
+            />
           </div>
         </transition-group>
+
+        <!-- Skeleton: aparece enquanto a próxima foto está decodificando
+             (e na entrada inicial, antes da 1ª foto estar pronta). -->
+        <div v-if="!screensaverLoaded" class="screensaver-skeleton">
+          <div class="skeleton-shimmer" />
+          <p class="skeleton-text">Carregando memória…</p>
+        </div>
 
         <div class="screensaver-overlay">
           <div class="screensaver-hint">
@@ -1382,6 +1472,17 @@ onBeforeUnmount(() => {
   z-index: 4;
   background: #000;
   cursor: pointer;
+}
+.screensaver-skeleton {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: linear-gradient(180deg, #0c2c4f 0%, #0a1f3a 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
 }
 .screensaver-overlay {
   position: absolute;
