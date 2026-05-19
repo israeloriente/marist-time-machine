@@ -299,13 +299,53 @@ function loadYouTubeAPI(): Promise<void> {
   return ytReadyPromise;
 }
 
-async function playSong(videoId: string, title?: string) {
-  currentSongTitle.value = title || "♪";
+// Target volume the music settles at. We fade from 0 → this on song start
+// and from this → 0 when transitioning to a new track.
+const SONG_TARGET_VOLUME = 60;
+const FADE_DURATION_MS = 1200;
+const FADE_STEP_MS = 40;
+let fadeTimer: number | null = null;
 
+function clearFadeTimer() {
+  if (fadeTimer !== null) {
+    window.clearInterval(fadeTimer);
+    fadeTimer = null;
+  }
+}
+
+function fadeVolume(
+  from: number,
+  to: number,
+  durationMs = FADE_DURATION_MS,
+): Promise<void> {
+  clearFadeTimer();
+  return new Promise((resolve) => {
+    if (!ytPlayer?.setVolume) {
+      resolve();
+      return;
+    }
+    const steps = Math.max(1, Math.round(durationMs / FADE_STEP_MS));
+    let i = 0;
+    try { ytPlayer.setVolume(from); } catch { /* ignore */ }
+    fadeTimer = window.setInterval(() => {
+      i++;
+      const v = from + ((to - from) * i) / steps;
+      try { ytPlayer.setVolume(Math.max(0, Math.min(100, v))); } catch { /* ignore */ }
+      if (i >= steps) {
+        clearFadeTimer();
+        resolve();
+      }
+    }, FADE_STEP_MS);
+  });
+}
+
+async function playSong(videoId: string, title?: string) {
   await loadYouTubeAPI();
   if (!playerEl.value) return;
 
   if (!ytPlayer) {
+    // First playback ever — create the player muted-start so the fade-in
+    // is smooth.
     ytPlayer = new (window as any).YT.Player(playerEl.value, {
       height: "1",
       width: "1",
@@ -313,11 +353,12 @@ async function playSong(videoId: string, title?: string) {
       playerVars: { autoplay: 1, controls: 0, modestbranding: 1, playsinline: 1 },
       events: {
         onReady: (e: any) => {
-          e.target.setVolume(60);
+          e.target.setVolume(0);
           e.target.playVideo();
-          // Browsers block autoplay-with-sound without a gesture. If after
-          // ~600ms the player is still UNSTARTED (-1) or CUED (5), we treat
-          // it as blocked and surface a "Tocar música" button.
+          currentSongTitle.value = title || "♪";
+          // Fade-in once we start playing
+          void fadeVolume(0, SONG_TARGET_VOLUME);
+          // Detect autoplay block ~600ms after ready
           setTimeout(() => {
             try {
               const state = e.target.getPlayerState?.();
@@ -343,9 +384,16 @@ async function playSong(videoId: string, title?: string) {
         },
       },
     });
-  } else {
-    ytPlayer.loadVideoById(videoId);
+    return;
   }
+
+  // Player already exists — crossfade: fade out current, swap track, fade in.
+  await fadeVolume(SONG_TARGET_VOLUME, 0);
+  currentSongTitle.value = title || "♪";
+  try { ytPlayer.loadVideoById(videoId); } catch { /* ignore */ }
+  // Give the new video a beat to start before ramping volume back up.
+  await new Promise((r) => setTimeout(r, 250));
+  await fadeVolume(0, SONG_TARGET_VOLUME);
 }
 
 function playHeroMusic() {
@@ -364,6 +412,7 @@ async function playNextSong() {
 /** Called from the "Tocar música" fallback button when browser blocked autoplay. */
 function unblockAudio() {
   try {
+    ytPlayer?.setVolume?.(SONG_TARGET_VOLUME);
     ytPlayer?.playVideo?.();
     audioBlocked.value = false;
   } catch {
@@ -372,6 +421,7 @@ function unblockAudio() {
 }
 
 function stopMusic() {
+  clearFadeTimer();
   try {
     ytPlayer?.stopVideo?.();
     ytPlayer?.destroy?.();
