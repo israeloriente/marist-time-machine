@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
+import CenteredNotice from "@/components/CenteredNotice.vue";
 import FaceThumb from "@/components/FaceThumb.vue";
 import { peopleApi, type AvailableFilters, type Face, type Person } from "@/services/api";
 import { useNotifyStore } from "@/stores/notify";
@@ -223,13 +224,13 @@ onMounted(async () => {
     </div>
   </section>
 
-  <p v-if="loading" class="muted">Carregando…</p>
-  <p v-else-if="!filtered.length" class="muted">
+  <CenteredNotice v-if="loading" variant="loading">Carregando…</CenteredNotice>
+  <CenteredNotice v-else-if="!filtered.length" variant="empty">
     <template v-if="hasFilters">Nenhuma pessoa nessa combinação de filtros.</template>
     <template v-else>
       Nenhuma pessoa ainda. Suba mais fotos ou rode "Reagrupar agora" no painel.
     </template>
-  </p>
+  </CenteredNotice>
   <div v-else>
     <p class="muted small results-count">
       {{ filtered.length }} {{ filtered.length === 1 ? "pessoa" : "pessoas" }}

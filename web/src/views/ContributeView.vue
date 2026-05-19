@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import CenteredNotice from "@/components/CenteredNotice.vue";
 import FaceThumb from "@/components/FaceThumb.vue";
 import SuggestNameDialog from "@/components/SuggestNameDialog.vue";
 import {
@@ -210,14 +211,14 @@ onMounted(async () => {
       </button>
     </div>
 
-    <p v-if="loading" class="muted">Carregando…</p>
-    <p v-else-if="error" class="error">{{ error }}</p>
+    <CenteredNotice v-if="loading" variant="loading">Carregando…</CenteredNotice>
+    <CenteredNotice v-else-if="error" variant="error">{{ error }}</CenteredNotice>
 
     <!-- Anonymous people -->
     <div v-else-if="mode === 'people'">
-      <p v-if="!peopleCount" class="muted small">
+      <CenteredNotice v-if="!peopleCount" variant="empty">
         🎉 Todas as pessoas já têm sugestões ou nome. Volte depois pra mais.
-      </p>
+      </CenteredNotice>
       <div v-else class="grid">
         <div v-for="p in anonymousPeople" :key="p.id" class="card-item">
           <FaceThumb
@@ -240,7 +241,9 @@ onMounted(async () => {
 
     <!-- Orphan faces -->
     <div v-else>
-      <p v-if="!facesCount" class="muted small">Nenhum rosto avulso no momento.</p>
+      <CenteredNotice v-if="!facesCount" variant="empty">
+        Nenhum rosto avulso no momento.
+      </CenteredNotice>
       <div v-else class="grid">
         <div v-for="f in orphanFaces" :key="f.id" class="card-item">
           <FaceThumb :src="f.signed_url" :bbox="f.bbox" :size="100" :padding="0.3" />

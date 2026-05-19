@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { RouterLink } from "vue-router";
+import CenteredNotice from "@/components/CenteredNotice.vue";
 import FaceThumb from "@/components/FaceThumb.vue";
 import {
   suggestionsApi,
@@ -73,8 +74,12 @@ onMounted(load);
     </div>
   </header>
 
-  <p v-if="loading && !items.length" class="muted">Carregando…</p>
-  <p v-else-if="!items.length" class="muted">🎉 Nenhuma sugestão pendente.</p>
+  <CenteredNotice v-if="loading && !items.length" variant="loading">
+    Carregando…
+  </CenteredNotice>
+  <CenteredNotice v-else-if="!items.length" variant="empty">
+    🎉 Nenhuma sugestão pendente.
+  </CenteredNotice>
 
   <ul v-else class="sugg-cards">
     <li v-for="t in items" :key="(t.person_id ?? t.face_id) as string" class="sugg-card">

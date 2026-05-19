@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
 import { RouterLink, useRoute, useRouter } from "vue-router";
+import CenteredNotice from "@/components/CenteredNotice.vue";
 import FaceThumb from "@/components/FaceThumb.vue";
 import MediaPreview from "@/components/MediaPreview.vue";
 import PersonPickerDialog from "@/components/PersonPickerDialog.vue";
@@ -208,8 +209,8 @@ onMounted(load);
       <RouterLink to="/admin/pessoas" class="muted">← Voltar pra Pessoas</RouterLink>
     </div>
 
-    <p v-if="loading" class="muted">Carregando…</p>
-    <p v-else-if="error" class="error">{{ error }}</p>
+    <CenteredNotice v-if="loading" variant="loading">Carregando…</CenteredNotice>
+    <CenteredNotice v-else-if="error" variant="error">{{ error }}</CenteredNotice>
     <template v-else-if="person">
       <div class="header">
         <FaceThumb

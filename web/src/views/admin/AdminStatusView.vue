@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import CenteredNotice from "@/components/CenteredNotice.vue";
 import { peopleApi, type ReclusterStatus } from "@/services/api";
 
 const status = ref<ReclusterStatus | null>(null);
@@ -31,7 +32,7 @@ onMounted(load);
     <button class="button secondary" @click="load">Atualizar</button>
   </header>
 
-  <p v-if="loading" class="muted">Carregando…</p>
+  <CenteredNotice v-if="loading" variant="loading">Carregando…</CenteredNotice>
 
   <section v-else class="card">
     <h3>Reagrupamento noturno</h3>

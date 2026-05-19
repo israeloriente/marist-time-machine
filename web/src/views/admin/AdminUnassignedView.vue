@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, watch } from "vue";
+import CenteredNotice from "@/components/CenteredNotice.vue";
 import FaceThumb from "@/components/FaceThumb.vue";
 import PersonPickerDialog from "@/components/PersonPickerDialog.vue";
 import { facesApi, type Face, type Person } from "@/services/api";
@@ -123,13 +124,15 @@ onMounted(() => load(true));
     </button>
   </div>
 
-  <p v-if="loading && !unassigned.length" class="muted">Carregando…</p>
-  <p v-else-if="!unassigned.length" class="muted">
+  <CenteredNotice v-if="loading && !unassigned.length" variant="loading">
+    Carregando…
+  </CenteredNotice>
+  <CenteredNotice v-else-if="!unassigned.length" variant="empty">
     <template v-if="tab === 'active'">
       🎉 Todos os rostos detectados já estão atribuídos a uma pessoa.
     </template>
     <template v-else>Nenhum rosto rejeitado.</template>
-  </p>
+  </CenteredNotice>
   <div v-else class="faces-grid">
     <div v-for="f in unassigned" :key="f.id" class="face-card">
       <FaceThumb :src="f.signed_url" :bbox="f.bbox" :size="96" :padding="0.3" />

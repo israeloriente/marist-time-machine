@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import CenteredNotice from "@/components/CenteredNotice.vue";
 import {
   reportsApi,
   type Report,
@@ -116,11 +117,11 @@ onMounted(async () => {
 
   <h3 class="section-title">{{ currentTitle }}</h3>
 
-  <p v-if="loading" class="muted">Carregando…</p>
-  <p v-else-if="!items.length" class="muted">
+  <CenteredNotice v-if="loading" variant="loading">Carregando…</CenteredNotice>
+  <CenteredNotice v-else-if="!items.length" variant="empty">
     <template v-if="status === 'pending'">🎉 Nada na fila. Sem denúncias pendentes!</template>
     <template v-else>Nenhuma denúncia.</template>
-  </p>
+  </CenteredNotice>
 
   <div v-else class="list">
     <article v-for="r in items" :key="r.id" class="card-item">

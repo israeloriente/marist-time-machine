@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
-import SongCard from "@/components/SongCard.vue";
+import CenteredNotice from "@/components/CenteredNotice.vue";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
+import SongCard from "@/components/SongCard.vue";
 import { peopleApi, songsApi, type AvailableFilters, type Song } from "@/services/api";
 import { useAuthStore } from "@/stores/auth";
 import { useNotifyStore } from "@/stores/notify";
@@ -170,11 +171,11 @@ onMounted(async () => {
     </label>
   </section>
 
-  <p v-if="loading" class="muted">Carregando…</p>
-  <p v-else-if="error" class="error">{{ error }}</p>
-  <p v-else-if="!songs.length" class="muted">
+  <CenteredNotice v-if="loading" variant="loading">Carregando…</CenteredNotice>
+  <CenteredNotice v-else-if="error" variant="error">{{ error }}</CenteredNotice>
+  <CenteredNotice v-else-if="!songs.length" variant="empty">
     Ainda não tem música por aqui. Cole uma URL acima pra começar.
-  </p>
+  </CenteredNotice>
 
   <div v-else class="groups">
     <section v-for="g in grouped" :key="g.key" class="group">

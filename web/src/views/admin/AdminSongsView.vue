@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from "vue";
+import CenteredNotice from "@/components/CenteredNotice.vue";
 import ConfirmDialog from "@/components/ConfirmDialog.vue";
 import {
   songsModerationApi,
@@ -226,11 +227,11 @@ onMounted(async () => {
 
   <h3 class="section-title">{{ currentTitle }}</h3>
 
-  <p v-if="loading" class="muted">Carregando…</p>
-  <p v-else-if="!items.length" class="muted">
+  <CenteredNotice v-if="loading" variant="loading">Carregando…</CenteredNotice>
+  <CenteredNotice v-else-if="!items.length" variant="empty">
     <template v-if="status === 'pending'">🎉 Nada na fila. Tudo aprovado!</template>
     <template v-else>Nenhuma música.</template>
-  </p>
+  </CenteredNotice>
 
   <div v-else class="list">
     <article
