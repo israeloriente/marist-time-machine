@@ -3,7 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref } from "vue";
 import QrCode from "@/components/QrCode.vue";
 import ReportDialog from "@/components/ReportDialog.vue";
 
-const APP_URL = "https://app-marista.israeloriente.com/";
+const APP_URL = "https://capsula-marista.israeloriente.com/";
 import {
   randomPhotos,
   searchByFace,
