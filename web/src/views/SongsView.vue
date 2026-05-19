@@ -130,7 +130,7 @@ onMounted(async () => {
     <h1>Músicas que marcaram</h1>
     <p>
       Compartilhe as músicas que tocaram durante seus anos no colégio. Festas, formaturas,
-      ensaios, intervalos — adicione com a URL do YouTube.
+      ensaios e principalmente toques do intervalo — adicione com a URL do YouTube.
     </p>
   </section>
 
