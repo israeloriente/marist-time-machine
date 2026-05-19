@@ -194,6 +194,46 @@ async def filters_available(_user: User = CurrentUser) -> dict:
     }
 
 
+# IMPORTANT: keep all fixed-path routes (/stats, /merge, /recluster*) ABOVE
+# the dynamic /{person_id} ones. FastAPI matches routes in declaration order,
+# so a request to /people/stats would otherwise be parsed as person_id="stats"
+# and blow up Pydantic's UUID parsing.
+
+@router.get("/stats")
+async def get_stats(_user: User = CurrentUser) -> dict:
+    """Return how many faces are clustered, total, and how many people exist."""
+    return await clustering_stats()
+
+
+@router.post("/merge")
+async def merge_people(body: MergeRequest, _user: User = RequireAdmin) -> dict:
+    """Reassign all faces from source to target, then delete source."""
+    if body.source_id == body.target_id:
+        raise HTTPException(status_code=400, detail="source and target must differ")
+    await db.execute(
+        "update public.faces set person_id = $1 where person_id = $2",
+        body.target_id,
+        body.source_id,
+    )
+    await db.execute("delete from public.people where id = $1", body.source_id)
+    return {"ok": True}
+
+
+@router.post("/recluster")
+async def recluster(reset: bool = True, _user: User = RequireAdmin) -> dict:
+    """Re-run DBSCAN globally. If reset=true, wipes existing clusters first."""
+    return await recluster_all(reset=reset)
+
+
+@router.get("/recluster/status")
+async def recluster_status(_user: User = CurrentUser) -> dict:
+    """Show last scheduled recluster result + next scheduled run."""
+    return {
+        "next_run_at": scheduler.next_run_iso(),
+        "last": scheduler.last_result() or None,
+    }
+
+
 @router.get("/{person_id}", response_model=PersonOut)
 async def get_person(person_id: UUID, _user: User = CurrentUser) -> PersonOut:
     """Return a single person regardless of status — admin needs this to
@@ -264,41 +304,6 @@ async def update_person(
     if not row:
         raise HTTPException(status_code=404, detail="person not found")
     return PersonOut(**dict(row))
-
-
-@router.post("/merge")
-async def merge_people(body: MergeRequest, _user: User = RequireAdmin) -> dict:
-    """Reassign all faces from source to target, then delete source."""
-    if body.source_id == body.target_id:
-        raise HTTPException(status_code=400, detail="source and target must differ")
-    await db.execute(
-        "update public.faces set person_id = $1 where person_id = $2",
-        body.target_id,
-        body.source_id,
-    )
-    await db.execute("delete from public.people where id = $1", body.source_id)
-    return {"ok": True}
-
-
-@router.get("/stats")
-async def get_stats(_user: User = CurrentUser) -> dict:
-    """Return how many faces are clustered, total, and how many people exist."""
-    return await clustering_stats()
-
-
-@router.post("/recluster")
-async def recluster(reset: bool = True, _user: User = RequireAdmin) -> dict:
-    """Re-run DBSCAN globally. If reset=true, wipes existing clusters first."""
-    return await recluster_all(reset=reset)
-
-
-@router.get("/recluster/status")
-async def recluster_status(_user: User = CurrentUser) -> dict:
-    """Show last scheduled recluster result + next scheduled run."""
-    return {
-        "next_run_at": scheduler.next_run_iso(),
-        "last": scheduler.last_result() or None,
-    }
 
 
 @router.get("/{person_id}/photos")
