@@ -61,6 +61,17 @@ const songs = ref<Song[]>([]);
 const currentSongIdx = ref(0);
 const currentSongTitle = ref<string>("");
 
+// Ambient music played while the hero ("Um pedaço de você…") is on screen.
+// When the user starts the journey we swap to songs of their graduation
+// year; on reset we come back to this default.
+const HERO_DEFAULT_VIDEO_ID = "apksAnXSeIw";
+// True when the browser refused autoplay-with-sound and the user must
+// click a button to start playback.
+const audioBlocked = ref(false);
+// Tracks whether the current playback is the hero default (so onStateChange
+// loops the default but advances the playlist when playing class songs).
+let isPlayingHeroDefault = false;
+
 // Search result
 const result = ref<SearchResponse | null>(null);
 const totalSteps = 4; // pseudo progress
@@ -280,11 +291,8 @@ function loadYouTubeAPI(): Promise<void> {
   return ytReadyPromise;
 }
 
-async function playNextSong() {
-  if (!songs.value.length) return;
-  const s = songs.value[currentSongIdx.value % songs.value.length];
-  currentSongTitle.value = s.title || "♪";
-  currentSongIdx.value++;
+async function playSong(videoId: string, title?: string) {
+  currentSongTitle.value = title || "♪";
 
   await loadYouTubeAPI();
   if (!playerEl.value) return;
@@ -293,22 +301,65 @@ async function playNextSong() {
     ytPlayer = new (window as any).YT.Player(playerEl.value, {
       height: "1",
       width: "1",
-      videoId: s.youtube_id,
+      videoId,
       playerVars: { autoplay: 1, controls: 0, modestbranding: 1, playsinline: 1 },
       events: {
         onReady: (e: any) => {
-          e.target.setVolume(70);
+          e.target.setVolume(60);
           e.target.playVideo();
+          // Browsers block autoplay-with-sound without a gesture. If after
+          // ~600ms the player is still UNSTARTED (-1) or CUED (5), we treat
+          // it as blocked and surface a "Tocar música" button.
+          setTimeout(() => {
+            try {
+              const state = e.target.getPlayerState?.();
+              audioBlocked.value = state === -1 || state === 5;
+            } catch {
+              audioBlocked.value = true;
+            }
+          }, 600);
         },
         onStateChange: (e: any) => {
-          // 0 = ended → próxima
-          if (e.data === 0) playNextSong();
+          if (e.data === 1) audioBlocked.value = false; // PLAYING
+          // 0 = ended → loop hero default, or advance the class playlist.
+          if (e.data === 0) {
+            if (isPlayingHeroDefault) {
+              ytPlayer.playVideo();
+            } else {
+              playNextSong();
+            }
+          }
         },
-        onError: () => playNextSong(),
+        onError: () => {
+          if (!isPlayingHeroDefault) playNextSong();
+        },
       },
     });
   } else {
-    ytPlayer.loadVideoById(s.youtube_id);
+    ytPlayer.loadVideoById(videoId);
+  }
+}
+
+function playHeroMusic() {
+  isPlayingHeroDefault = true;
+  void playSong(HERO_DEFAULT_VIDEO_ID, "Trilha da Cápsula");
+}
+
+async function playNextSong() {
+  if (!songs.value.length) return;
+  isPlayingHeroDefault = false;
+  const s = songs.value[currentSongIdx.value % songs.value.length];
+  currentSongIdx.value++;
+  await playSong(s.youtube_id, s.title || "♪");
+}
+
+/** Called from the "Tocar música" fallback button when browser blocked autoplay. */
+function unblockAudio() {
+  try {
+    ytPlayer?.playVideo?.();
+    audioBlocked.value = false;
+  } catch {
+    /* ignore */
   }
 }
 
@@ -320,6 +371,8 @@ function stopMusic() {
     /* ignore */
   }
   ytPlayer = null;
+  isPlayingHeroDefault = false;
+  audioBlocked.value = false;
 }
 
 // ---- Main flow ----
@@ -591,6 +644,8 @@ function reset() {
   currentSongTitle.value = "";
   progressStep.value = 0;
   phase.value = "idle";
+  // Back to the hero — resume the ambient default track.
+  playHeroMusic();
 }
 
 // ---- Slideshow ----
@@ -621,9 +676,11 @@ const progressPct = computed(() => Math.round((progressStep.value / totalSteps) 
 // ---- Init ----
 
 onMounted(() => {
-  // Nothing to bootstrap — page is public. Camera prompt happens on user
-  // click (browser blocks getUserMedia without a gesture anyway).
   window.addEventListener("keydown", onLightboxKey);
+  // Ambient music while the hero is on screen. The browser may block
+  // autoplay-with-sound — in that case, the player.onReady callback
+  // flips audioBlocked=true and a "Tocar música" button shows up.
+  playHeroMusic();
 });
 
 onBeforeUnmount(() => {
@@ -683,6 +740,16 @@ onBeforeUnmount(() => {
           </button>
 
           <p v-if="error" class="error">{{ error }}</p>
+
+          <button
+            v-if="audioBlocked"
+            type="button"
+            class="audio-unlock"
+            @click="unblockAudio"
+            aria-label="Ativar áudio de fundo"
+          >
+            🔊 Tocar música
+          </button>
         </div>
 
         <div class="hero-bg" aria-hidden="true">
@@ -1027,6 +1094,25 @@ onBeforeUnmount(() => {
   color: var(--marista-navy);
   border-color: var(--marista-yellow);
   transform: scale(1.05);
+}
+
+.audio-unlock {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 1rem;
+  padding: 0.5rem 1rem;
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--marista-white);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 999px;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.audio-unlock:hover {
+  background: rgba(255, 255, 255, 0.18);
 }
 
 .big-cta {
