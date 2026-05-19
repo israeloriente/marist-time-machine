@@ -27,30 +27,26 @@ export const useAuthStore = defineStore(
       });
     }
 
-    async function signInWithEmail(email: string, password: string) {
+    /** Start the Google OAuth flow. Supabase redirects the browser to
+     *  Google, which redirects back to /auth/v1/callback on our Supabase
+     *  domain, which then redirects to the URL we pass below. */
+    async function signInWithGoogle(redirectPath = "/") {
       loading.value = true;
       error.value = null;
       try {
-        const { data, error: err } = await supabase.auth.signInWithPassword({ email, password });
+        const origin = window.location.origin;
+        const { error: err } = await supabase.auth.signInWithOAuth({
+          provider: "google",
+          options: {
+            redirectTo: `${origin}${redirectPath}`,
+            // We don't need access to Drive/Gmail — just the identity.
+            scopes: "openid email profile",
+          },
+        });
         if (err) throw err;
-        session.value = data.session;
+        // The browser is about to navigate to Google; nothing else to do.
       } catch (e: any) {
         error.value = e.message ?? String(e);
-      } finally {
-        loading.value = false;
-      }
-    }
-
-    async function signUpWithEmail(email: string, password: string) {
-      loading.value = true;
-      error.value = null;
-      try {
-        const { data, error: err } = await supabase.auth.signUp({ email, password });
-        if (err) throw err;
-        session.value = data.session;
-      } catch (e: any) {
-        error.value = e.message ?? String(e);
-      } finally {
         loading.value = false;
       }
     }
@@ -60,7 +56,15 @@ export const useAuthStore = defineStore(
       session.value = null;
     }
 
-    return { session, isAdmin, loading, error, init, signInWithEmail, signUpWithEmail, signOut };
+    return {
+      session,
+      isAdmin,
+      loading,
+      error,
+      init,
+      signInWithGoogle,
+      signOut,
+    };
   },
   { persist: false },
 );
