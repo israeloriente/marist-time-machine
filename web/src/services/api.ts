@@ -198,6 +198,18 @@ export async function randomPhotos(limit = 30, year?: number): Promise<RandomPho
   return data;
 }
 
+export interface PublicStats {
+  photos: number;
+  named_people: number;
+  years: number;
+  oldest_year: number | null;
+}
+
+export async function publicStats(): Promise<PublicStats> {
+  const { data } = await api.get<PublicStats>("/photos/stats/public");
+  return data;
+}
+
 export async function regenerateVideoThumbnails(): Promise<{
   videos_visited: number;
   thumbnails_generated: number;

@@ -544,6 +544,45 @@ async def bulk_delete(body: BulkRequest, _user: User = RequireAdmin) -> BulkResu
     return BulkResult(succeeded=succeeded, failed=failed)
 
 
+@router.get("/stats/public")
+async def public_stats() -> dict:
+    """Acervo-wide counts for the public home/hero. No auth.
+
+    - photos: approved image+video count
+    - people: named people (display_name not null) that aren't rejected
+    - years: number of distinct graduation_years represented
+    - oldest_year: smallest graduation_year (helps the copy "desde XX")
+    """
+    row = await db.fetchrow(
+        """
+        with approved_photos as (
+          select id, metadata
+          from public.photos
+          where moderation_status = 'approved'
+        )
+        select
+          (select count(*) from approved_photos) as photos,
+          (select count(*) from public.people
+             where display_name is not null
+               and status = 'active') as named_people,
+          (select count(distinct (metadata->>'graduation_year')::int)
+             from approved_photos
+             where metadata ? 'graduation_year'
+               and metadata->>'graduation_year' ~ '^\\d+$') as years,
+          (select min((metadata->>'graduation_year')::int)
+             from approved_photos
+             where metadata ? 'graduation_year'
+               and metadata->>'graduation_year' ~ '^\\d+$') as oldest_year
+        """
+    )
+    return {
+        "photos": int(row["photos"]) if row else 0,
+        "named_people": int(row["named_people"]) if row else 0,
+        "years": int(row["years"]) if row else 0,
+        "oldest_year": row["oldest_year"] if row else None,
+    }
+
+
 @router.get("", response_model=list[PhotoOut])
 async def list_photos(limit: int = 50, offset: int = 0, _user: User = RequireAdmin) -> list[PhotoOut]:
     rows = await db.fetch(
