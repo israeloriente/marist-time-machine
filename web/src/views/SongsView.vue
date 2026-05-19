@@ -19,7 +19,6 @@ const adding = ref(false);
 const addError = ref<string | null>(null);
 
 const year = ref<number | "">("");
-const klass = ref<string>("");
 const onlyMine = ref(false);
 const available = ref<AvailableFilters>({ years: [], classes: [] });
 
@@ -28,7 +27,6 @@ const currentUserId = computed(() => auth.session?.user?.id ?? null);
 interface Group {
   key: string;
   year: number | null;
-  class_letter: string | null;
   songs: Song[];
 }
 
@@ -36,35 +34,31 @@ const grouped = computed<Group[]>(() => {
   const buckets = new Map<string, Group>();
   for (const s of songs.value) {
     const y = s.user_graduation_year;
-    const c = s.user_class_letter;
-    const key = `${y ?? ""}-${c ?? ""}`;
+    const key = String(y ?? "");
     if (!buckets.has(key)) {
-      buckets.set(key, { key, year: y, class_letter: c, songs: [] });
+      buckets.set(key, { key, year: y, songs: [] });
     }
     buckets.get(key)!.songs.push(s);
   }
-  // Order: defined turma first (more recent year first), undefined at the end.
+  // Order: defined year first (most recent first), undefined at the end.
   return Array.from(buckets.values()).sort((a, b) => {
     if (a.year == null && b.year != null) return 1;
     if (b.year == null && a.year != null) return -1;
-    if ((a.year ?? 0) !== (b.year ?? 0)) return (b.year ?? 0) - (a.year ?? 0);
-    return (a.class_letter || "").localeCompare(b.class_letter || "");
+    return (b.year ?? 0) - (a.year ?? 0);
   });
 });
 
 function groupLabel(g: Group) {
-  if (g.year == null && g.class_letter == null) return "Sem turma informada";
-  const yr = g.year ?? "—";
-  return g.class_letter ? `Turma ${g.class_letter} · ${yr}` : `Turma ${yr}`;
+  if (g.year == null) return "Sem ano informado";
+  return `Turma de ${g.year}`;
 }
 
 async function load() {
   loading.value = true;
   error.value = null;
   try {
-    const filters: { year?: number; class?: string; user_id?: string } = {};
+    const filters: { year?: number; user_id?: string } = {};
     if (year.value !== "") filters.year = year.value;
-    if (klass.value) filters.class = klass.value;
     if (onlyMine.value && currentUserId.value) filters.user_id = currentUserId.value;
     songs.value = await songsApi.list(filters);
   } catch (e: any) {
@@ -122,7 +116,7 @@ async function confirmRemove() {
   }
 }
 
-watch([year, klass, onlyMine], load);
+watch([year, onlyMine], load);
 
 onMounted(async () => {
   await Promise.all([loadFilters(), load()]);
@@ -169,10 +163,6 @@ onMounted(async () => {
     <select v-model.number="year" class="input">
       <option value="">Todos os anos</option>
       <option v-for="y in available.years" :key="y" :value="y">{{ y }}</option>
-    </select>
-    <select v-model="klass" class="input">
-      <option value="">Todas as turmas</option>
-      <option v-for="c in available.classes" :key="c" :value="c">{{ c }}</option>
     </select>
     <label class="checkbox">
       <input v-model="onlyMine" type="checkbox" />
@@ -261,7 +251,7 @@ onMounted(async () => {
 
 .filters {
   display: grid;
-  grid-template-columns: 1fr 1fr auto;
+  grid-template-columns: 1fr auto;
   gap: 0.5rem;
   margin-bottom: 1.25rem;
   align-items: center;
@@ -275,8 +265,7 @@ onMounted(async () => {
   white-space: nowrap;
 }
 @media (max-width: 480px) {
-  .filters { grid-template-columns: 1fr 1fr; }
-  .checkbox { grid-column: 1 / -1; }
+  .filters { grid-template-columns: 1fr; }
 }
 
 .groups { display: flex; flex-direction: column; gap: 1.5rem; }
