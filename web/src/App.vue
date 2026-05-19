@@ -41,8 +41,8 @@ async function signOut() {
     <header class="topbar">
       <RouterLink to="/" class="brand">
         <span class="dot" />
-        <span class="brand-full">Marist Time Machine</span>
-        <span class="brand-short">Time Machine</span>
+        <span class="brand-full">Cápsula do Tempo Marista</span>
+        <span class="brand-short">Cápsula do Tempo</span>
       </RouterLink>
       <nav v-if="auth.session" class="topbar-nav">
         <!-- Desktop-only links (mobile uses the bottom tabbar) -->

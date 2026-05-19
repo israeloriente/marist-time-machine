@@ -47,7 +47,7 @@ onMounted(async () => {
   <section class="hero onboarding">
     <span class="kicker">Bem-vindo!</span>
     <h1>Conte sobre você</h1>
-    <p>Esses dados ajudam a Máquina do Tempo a achar fotos da sua turma.</p>
+    <p>Esses dados ajudam a Cápsula do Tempo a achar fotos da sua turma.</p>
 
     <form class="form" @submit.prevent="submit">
       <label>

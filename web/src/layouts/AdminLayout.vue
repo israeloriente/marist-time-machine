@@ -69,7 +69,7 @@ const userInitial = computed(() => userEmail.value.slice(0, 1).toUpperCase());
       </button>
       <RouterLink to="/admin" class="admin-brand">
         <span class="brand-dot" />
-        <span class="brand-name">Marist Time Machine</span>
+        <span class="brand-name">Cápsula do Tempo Marista</span>
       </RouterLink>
       <RouterLink to="/" class="exit-icon" aria-label="Sair do admin">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -84,7 +84,7 @@ const userInitial = computed(() => userEmail.value.slice(0, 1).toUpperCase());
     <aside class="admin-sidebar" :class="{ open: drawerOpen }">
       <RouterLink to="/admin" class="sidebar-brand">
         <span class="brand-dot" />
-        <span>Marist Time Machine</span>
+        <span>Cápsula do Tempo Marista</span>
       </RouterLink>
 
       <nav class="sidebar-nav">

@@ -10,8 +10,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg", "robots.txt"],
       manifest: {
-        name: "Marist Time Machine",
-        short_name: "Time Machine",
+        name: "Cápsula do Tempo Marista",
+        short_name: "Cápsula do Tempo",
         description: "Encontre suas fotos do acervo Marista com uma selfie.",
         theme_color: "#0c2c4f",
         background_color: "#0c2c4f",
