@@ -773,7 +773,10 @@ function onUserActivity() {
 }
 
 function reset() {
-  stopMusic();
+  // NB: deliberately do NOT call stopMusic() here — that would destroy the
+  // YouTube player and any new song would start abruptly. Instead, let
+  // playHeroMusic() crossfade the current track into the hero default
+  // (fade-out current → loadVideoById → fade-in).
   stopCamera();
   stopSlideshow();
   stopReveal();
@@ -785,10 +788,10 @@ function reset() {
   yearPhotosLoading.value = false;
   songs.value = [];
   currentSongIdx.value = 0;
-  currentSongTitle.value = "";
+  // Don't clear currentSongTitle — playSong will overwrite it after the
+  // fade-out, keeping the UI consistent while the transition happens.
   progressStep.value = 0;
   phase.value = "idle";
-  // Back to the hero — resume the ambient default track + idle timer.
   playHeroMusic();
   scheduleInactivityCheck();
 }
