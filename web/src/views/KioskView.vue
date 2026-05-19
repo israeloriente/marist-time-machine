@@ -22,7 +22,8 @@ type Phase =
   | "running"
   | "reveal"
   | "results"
-  | "year-photos";
+  | "year-photos"
+  | "screensaver";
 
 const phase = ref<Phase>("idle");
 const error = ref<string | null>(null);
@@ -65,6 +66,13 @@ const currentSongTitle = ref<string>("");
 // When the user starts the journey we swap to songs of their graduation
 // year; on reset we come back to this default.
 const HERO_DEFAULT_VIDEO_ID = "apksAnXSeIw";
+
+// Screensaver: after this long with no interaction in the hero, we go
+// fullscreen with a random photo mosaic + random song from any year.
+const SCREENSAVER_IDLE_MS = 60_000;
+const SCREENSAVER_PHOTO_INTERVAL_MS = 5000;
+let inactivityTimer: number | null = null;
+let screensaverSlideTimer: number | null = null;
 // True when the browser refused autoplay-with-sound and the user must
 // click a button to start playback.
 const audioBlocked = ref(false);
@@ -378,6 +386,9 @@ function stopMusic() {
 // ---- Main flow ----
 
 async function startJourney() {
+  // User is engaged — disarm the screensaver timer until they return to hero.
+  clearInactivityTimer();
+
   // Make sure camera is ready (no-op if already running)
   if (!stream.value) {
     await startCamera();
@@ -628,6 +639,89 @@ const currentRevealPhoto = computed(() => {
 // Expose to template
 const _maxReveal = MAX_REVEAL_PHOTOS;
 
+// ---- Screensaver ----------------------------------------------------------
+
+/** Reset the inactivity timer. Called by any user interaction. Only the
+ *  hero phases arm the timer; the rest already keeps the user engaged. */
+function scheduleInactivityCheck() {
+  clearInactivityTimer();
+  if (!isHeroPhase(phase.value)) return;
+  inactivityTimer = window.setTimeout(enterScreensaver, SCREENSAVER_IDLE_MS);
+}
+
+function clearInactivityTimer() {
+  if (inactivityTimer !== null) {
+    window.clearTimeout(inactivityTimer);
+    inactivityTimer = null;
+  }
+}
+
+function isHeroPhase(p: Phase): boolean {
+  return p === "idle" || p === "ready" || p === "loading-camera";
+}
+
+async function enterScreensaver() {
+  // Only enter from hero phases — guard against late timer firings after
+  // the user already moved on to the journey.
+  if (!isHeroPhase(phase.value)) return;
+
+  phase.value = "screensaver";
+
+  // Pool de fotos de TODOS os anos (sem filtro de year). Refresh every entry.
+  try {
+    const [pool, songPool] = await Promise.all([
+      randomPhotos(60).catch(() => []),
+      songsApi.random(undefined, 30).catch(() => []),
+    ]);
+    photos.value = pool;
+    if (songPool.length) {
+      songs.value = songPool;
+      currentSongIdx.value = 0;
+      playNextSong();
+    }
+  } catch {
+    /* silent — even if pool fetch fails, we stay on the screensaver with
+       whatever music's already playing. */
+  }
+
+  // Cycle photos a bit faster than the running slideshow.
+  slideIdx.value = 0;
+  if (screensaverSlideTimer) window.clearInterval(screensaverSlideTimer);
+  screensaverSlideTimer = window.setInterval(() => {
+    if (photos.value.length) {
+      slideIdx.value = (slideIdx.value + 1) % photos.value.length;
+    }
+  }, SCREENSAVER_PHOTO_INTERVAL_MS);
+}
+
+function exitScreensaver() {
+  if (phase.value !== "screensaver") return;
+  if (screensaverSlideTimer) {
+    window.clearInterval(screensaverSlideTimer);
+    screensaverSlideTimer = null;
+  }
+  // Stop journey-specific song; the hero default takes over again.
+  songs.value = [];
+  currentSongIdx.value = 0;
+  currentSongTitle.value = "";
+  photos.value = [];
+  slideIdx.value = 0;
+  phase.value = "idle";
+  playHeroMusic();
+  scheduleInactivityCheck();
+}
+
+function onUserActivity() {
+  if (phase.value === "screensaver") {
+    exitScreensaver();
+    return;
+  }
+  // Refresh the idle timer on every interaction while on the hero.
+  if (isHeroPhase(phase.value)) {
+    scheduleInactivityCheck();
+  }
+}
+
 function reset() {
   stopMusic();
   stopCamera();
@@ -644,8 +738,9 @@ function reset() {
   currentSongTitle.value = "";
   progressStep.value = 0;
   phase.value = "idle";
-  // Back to the hero — resume the ambient default track.
+  // Back to the hero — resume the ambient default track + idle timer.
   playHeroMusic();
+  scheduleInactivityCheck();
 }
 
 // ---- Slideshow ----
@@ -675,16 +770,35 @@ const progressPct = computed(() => Math.round((progressStep.value / totalSteps) 
 
 // ---- Init ----
 
+// Any of these wakes the screensaver / refreshes the idle timer.
+const ACTIVITY_EVENTS = [
+  "pointerdown",
+  "pointermove",
+  "keydown",
+  "wheel",
+  "touchstart",
+] as const;
+
 onMounted(() => {
   window.addEventListener("keydown", onLightboxKey);
+  for (const ev of ACTIVITY_EVENTS) {
+    window.addEventListener(ev, onUserActivity, { passive: true });
+  }
   // Ambient music while the hero is on screen. The browser may block
   // autoplay-with-sound — in that case, the player.onReady callback
   // flips audioBlocked=true and a "Tocar música" button shows up.
   playHeroMusic();
+  // Arm the inactivity timer immediately.
+  scheduleInactivityCheck();
 });
 
 onBeforeUnmount(() => {
   window.removeEventListener("keydown", onLightboxKey);
+  for (const ev of ACTIVITY_EVENTS) {
+    window.removeEventListener(ev, onUserActivity);
+  }
+  clearInactivityTimer();
+  if (screensaverSlideTimer) window.clearInterval(screensaverSlideTimer);
   stopCamera();
   stopMusic();
   stopSlideshow();
@@ -756,6 +870,40 @@ onBeforeUnmount(() => {
           <div class="orb orb-1" />
           <div class="orb orb-2" />
           <div class="orb orb-3" />
+        </div>
+      </section>
+    </transition>
+
+    <!-- SCREENSAVER: ambient slideshow when idle.
+         Any pointerdown/keydown anywhere wakes it via the global activity
+         listener; the explicit @click here makes it feel responsive on
+         touch too. -->
+    <transition name="fade">
+      <section
+        v-if="phase === 'screensaver'"
+        class="screensaver"
+        @click="exitScreensaver"
+      >
+        <transition-group name="cross" tag="div" class="slide-stack">
+          <div
+            v-if="currentPhoto"
+            :key="currentPhoto.id"
+            class="slide-frame ken-burns"
+          >
+            <div
+              class="slide-bg"
+              :style="{ backgroundImage: `url(${currentPhoto.signed_url})` }"
+            />
+            <img :src="currentPhoto.signed_url" class="slide-fg" alt="" />
+          </div>
+        </transition-group>
+
+        <div class="screensaver-overlay">
+          <div class="screensaver-hint">
+            <span class="kicker">Cápsula do Tempo Marista</span>
+            <h2>Toque para começar</h2>
+            <p>e descubra suas memórias do colégio</p>
+          </div>
         </div>
       </section>
     </transition>
@@ -1172,6 +1320,66 @@ onBeforeUnmount(() => {
   inset: 0;
   z-index: 3;
   background: #000;
+}
+
+/* ----- SCREENSAVER (reusa estrutura de slide-bg/slide-fg/ken-burns) ----- */
+.screensaver {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background: #000;
+  cursor: pointer;
+}
+.screensaver-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 6vh 4vw;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    rgba(12, 44, 79, 0.35) 0%,
+    rgba(12, 44, 79, 0.05) 30%,
+    rgba(12, 44, 79, 0.55) 100%
+  );
+}
+.screensaver-hint {
+  text-align: center;
+  max-width: 720px;
+  color: var(--marista-white);
+  text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6);
+  animation: hint-pulse 2.6s ease-in-out infinite;
+}
+.screensaver-hint .kicker {
+  display: inline-block;
+  background: var(--marista-yellow);
+  color: var(--marista-navy);
+  border-radius: 999px;
+  padding: 0.35rem 0.95rem;
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 1rem;
+}
+.screensaver-hint h2 {
+  margin: 0 0 0.45rem;
+  font-size: clamp(2rem, 6vw, 3.5rem);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: var(--marista-white);
+}
+.screensaver-hint p {
+  margin: 0;
+  font-size: clamp(1rem, 2.2vw, 1.3rem);
+  color: rgba(255, 255, 255, 0.9);
+}
+@keyframes hint-pulse {
+  0%, 100% { opacity: 1; transform: translateY(0); }
+  50%      { opacity: 0.75; transform: translateY(-4px); }
 }
 .slide-stack { position: absolute; inset: 0; }
 .slide-frame {
