@@ -46,7 +46,8 @@ const decodingPromises = new Map<string, Promise<boolean>>();
 
 const currentYear = new Date().getFullYear();
 const years = Array.from({ length: 60 }, (_, i) => currentYear - i);
-const selectedYear = ref<number>(currentYear - 10);
+// Sem default: a pessoa precisa escolher o ano de formatura antes de começar.
+const selectedYear = ref<number | null>(null);
 
 // Hidden camera elements
 const videoEl = ref<HTMLVideoElement | null>(null);
@@ -171,7 +172,7 @@ async function showYearPhotos() {
   if (yearPhotos.value.length) return; // already loaded
   yearPhotosLoading.value = true;
   try {
-    yearPhotos.value = await randomPhotos(120, selectedYear.value);
+    yearPhotos.value = await randomPhotos(120, selectedYear.value ?? undefined);
   } catch (e) {
     console.error("year photos failed", e);
     yearPhotos.value = [];
@@ -444,6 +445,10 @@ function stopMusic() {
 // ---- Main flow ----
 
 async function startJourney() {
+  if (selectedYear.value == null) {
+    error.value = "Escolha o ano em que você se formou antes de começar.";
+    return;
+  }
   // User is engaged — disarm the screensaver timer until they return to hero.
   clearInactivityTimer();
 
@@ -459,8 +464,9 @@ async function startJourney() {
   resultsVisible.value = PAGE_SIZE; // reset paging for a fresh search
 
   // 1) Fetch slideshow + songs in parallel (start animation ASAP)
-  const photosP = randomPhotos(40, selectedYear.value).catch(() => []);
-  const songsP = songsApi.random(selectedYear.value, 20).catch(() => []);
+  const year = selectedYear.value;
+  const photosP = randomPhotos(40, year).catch(() => []);
+  const songsP = songsApi.random(year, 20).catch(() => []);
 
   photos.value = await photosP;
   songs.value = await songsP;
@@ -996,10 +1002,11 @@ onBeforeUnmount(() => {
           <button
             type="button"
             class="big-cta"
-            :disabled="phase === 'loading-camera'"
+            :disabled="phase === 'loading-camera' || selectedYear === null"
             @click="startJourney"
           >
             <span v-if="phase === 'loading-camera'">Preparando…</span>
+            <span v-else-if="selectedYear === null">Escolha um ano acima</span>
             <span v-else>Volte no Tempo</span>
           </button>
 

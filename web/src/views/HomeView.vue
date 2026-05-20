@@ -153,8 +153,8 @@ onMounted(async () => {
             <path d="M12 17v4" />
           </svg>
         </span>
-        <strong>Apresentação do mural</strong>
-        <span class="action-desc">Veja o modo de exibição em tela cheia.</span>
+        <strong>Apresentação</strong>
+        <span class="action-desc">Veja o modo apresentação.</span>
       </RouterLink>
     </div>
   </section>
