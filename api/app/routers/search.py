@@ -37,6 +37,7 @@ class MatchedPhoto(BaseModel):
 
 class SearchResponse(BaseModel):
     person_id: UUID | None
+    display_name: str | None = None
     matched_faces: int
     photos: list[MatchedPhoto]
 
@@ -148,6 +149,11 @@ async def search_by_face(
         return SearchResponse(person_id=None, matched_faces=len(photos), photos=photos)
 
     person_id = nearest["person_id"]
+    person_row = await db.fetchrow(
+        "select display_name from public.people where id = $1",
+        person_id,
+    )
+    display_name = person_row["display_name"] if person_row else None
 
     rows = await db.fetch(
         """
@@ -186,4 +192,9 @@ async def search_by_face(
 
     photos.sort(key=lambda p: p.distance)
     _ = user  # optional; identity not used for ranking
-    return SearchResponse(person_id=person_id, matched_faces=len(photos), photos=photos)
+    return SearchResponse(
+        person_id=person_id,
+        display_name=display_name,
+        matched_faces=len(photos),
+        photos=photos,
+    )

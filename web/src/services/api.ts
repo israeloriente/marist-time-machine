@@ -78,6 +78,7 @@ export interface MatchedPhoto {
 
 export interface SearchResponse {
   person_id: string | null;
+  display_name: string | null;
   matched_faces: number;
   photos: MatchedPhoto[];
 }

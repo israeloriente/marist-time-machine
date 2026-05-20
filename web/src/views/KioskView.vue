@@ -479,7 +479,7 @@ async function startJourney() {
   if (snap) {
     searchP = searchByFace(snap).catch((e) => {
       console.error("search failed", e);
-      return { person_id: null, matched_faces: 0, photos: [] } as SearchResponse;
+      return { person_id: null, display_name: null, matched_faces: 0, photos: [] } as SearchResponse;
     });
   }
 
@@ -491,7 +491,7 @@ async function startJourney() {
   }
 
   // 4) Make sure the search is done before transitioning.
-  const res = searchP ? await searchP : ({ person_id: null, matched_faces: 0, photos: [] } as SearchResponse);
+  const res = searchP ? await searchP : ({ person_id: null, display_name: null, matched_faces: 0, photos: [] } as SearchResponse);
   result.value = res;
 
   // 5) Preload every reveal photo in parallel BEFORE the reveal starts —
@@ -713,6 +713,13 @@ function stopReveal() {
 const currentRevealPhoto = computed(() => {
   if (!result.value) return null;
   return result.value.photos[revealIdx.value] || null;
+});
+
+// Primeiro nome cru pra usar nas saudações ("Bem-vinda(o) de volta, Israel!").
+const welcomeFirstName = computed(() => {
+  const full = result.value?.display_name?.trim();
+  if (!full) return null;
+  return full.split(/\s+/)[0];
 });
 
 // Expose to template
@@ -1125,7 +1132,9 @@ onBeforeUnmount(() => {
 
         <div class="reveal-overlay">
           <div class="reveal-top">
-            <span class="kicker">Aqui está você</span>
+            <span class="kicker">
+              {{ welcomeFirstName ? `Bem-vindo de volta, ${welcomeFirstName}!` : "Aqui está você" }}
+            </span>
             <h2 v-if="revealIdx === 0">Encontramos suas memórias</h2>
             <p class="reveal-counter">
               {{ revealIdx + 1 }} de {{ Math.min(result?.photos.length ?? 0, _maxReveal) }}
@@ -1140,7 +1149,9 @@ onBeforeUnmount(() => {
     <transition name="fade">
       <section v-if="phase === 'results'" class="results">
         <div class="results-head">
-          <span class="kicker">Aqui está você</span>
+          <span class="kicker">
+            {{ welcomeFirstName ? `Bem-vindo de volta, ${welcomeFirstName}!` : "Aqui está você" }}
+          </span>
           <h2 v-if="result?.photos.length">
             {{ result.photos.length }} {{ result.photos.length === 1 ? "memória encontrada" : "memórias encontradas" }}
           </h2>

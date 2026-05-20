@@ -144,6 +144,18 @@ onMounted(async () => {
         <strong>Trilha sonora</strong>
         <span class="action-desc">Músicas do toque que marcaram a sua vida.</span>
       </RouterLink>
+
+      <RouterLink to="/kiosk" class="action-card">
+        <span class="action-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <path d="M8 21h8" />
+            <path d="M12 17v4" />
+          </svg>
+        </span>
+        <strong>Apresentação do mural</strong>
+        <span class="action-desc">Veja o modo de exibição em tela cheia.</span>
+      </RouterLink>
     </div>
   </section>
 </template>
@@ -372,7 +384,7 @@ onMounted(async () => {
   }
 }
 @media (min-width: 900px) {
-  .action-grid { grid-template-columns: repeat(4, 1fr); }
+  .action-grid { grid-template-columns: repeat(5, 1fr); }
   .action-card {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto;
