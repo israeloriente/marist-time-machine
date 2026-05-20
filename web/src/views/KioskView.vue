@@ -1132,10 +1132,24 @@ onBeforeUnmount(() => {
 
         <div class="reveal-overlay">
           <div class="reveal-top">
-            <span class="kicker">
-              {{ welcomeFirstName ? `Bem-vindo de volta, ${welcomeFirstName}!` : "Aqui está você" }}
-            </span>
-            <h2 v-if="revealIdx === 0">Encontramos suas memórias</h2>
+            <template v-if="welcomeFirstName && revealIdx === 0">
+              <span class="welcome-eyebrow">Bem-vindo de volta</span>
+              <h1 class="welcome-name">
+                <span
+                  v-for="(ch, i) in welcomeFirstName.split('')"
+                  :key="i"
+                  class="welcome-letter"
+                  :style="{ animationDelay: `${0.25 + i * 0.06}s` }"
+                >{{ ch }}</span><span class="welcome-bang" :style="{ animationDelay: `${0.25 + welcomeFirstName.length * 0.06}s` }">!</span>
+              </h1>
+              <p class="welcome-sub">Encontramos suas memórias</p>
+            </template>
+            <template v-else>
+              <span class="kicker">
+                {{ welcomeFirstName ? `Bem-vindo de volta, ${welcomeFirstName}!` : "Aqui está você" }}
+              </span>
+              <h2 v-if="revealIdx === 0">Encontramos suas memórias</h2>
+            </template>
             <p class="reveal-counter">
               {{ revealIdx + 1 }} de {{ Math.min(result?.photos.length ?? 0, _maxReveal) }}
             </p>
@@ -1149,9 +1163,18 @@ onBeforeUnmount(() => {
     <transition name="fade">
       <section v-if="phase === 'results'" class="results">
         <div class="results-head">
-          <span class="kicker">
-            {{ welcomeFirstName ? `Bem-vindo de volta, ${welcomeFirstName}!` : "Aqui está você" }}
-          </span>
+          <template v-if="welcomeFirstName">
+            <span class="welcome-eyebrow">Bem-vindo de volta</span>
+            <h1 class="welcome-name results-welcome-name">
+              <span
+                v-for="(ch, i) in welcomeFirstName.split('')"
+                :key="i"
+                class="welcome-letter"
+                :style="{ animationDelay: `${0.25 + i * 0.06}s` }"
+              >{{ ch }}</span><span class="welcome-bang" :style="{ animationDelay: `${0.25 + welcomeFirstName.length * 0.06}s` }">!</span>
+            </h1>
+          </template>
+          <span v-else class="kicker">Aqui está você</span>
           <h2 v-if="result?.photos.length">
             {{ result.photos.length }} {{ result.photos.length === 1 ? "memória encontrada" : "memórias encontradas" }}
           </h2>
@@ -1818,6 +1841,81 @@ onBeforeUnmount(() => {
   font-weight: 700;
   letter-spacing: 0.04em;
   font-size: 0.95rem;
+  margin-top: 1rem;
+}
+
+/* ===== Welcome (saudação personalizada) ===== */
+.welcome-eyebrow {
+  display: inline-block;
+  font-size: clamp(0.9rem, 1.8vw, 1.15rem);
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--marista-yellow);
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  animation: welcome-eyebrow-in 0.6s ease-out 0.05s forwards;
+}
+.welcome-name {
+  display: flex;
+  justify-content: center;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.02em;
+  margin: 0.4rem 0 0.5rem;
+  font-size: clamp(3rem, 11vw, 8rem);
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.02em;
+  color: var(--marista-white);
+  text-shadow:
+    0 4px 24px rgba(0, 0, 0, 0.65),
+    0 0 60px rgba(247, 201, 72, 0.45);
+}
+.results-welcome-name {
+  font-size: clamp(2.5rem, 9vw, 6.5rem);
+}
+.welcome-letter,
+.welcome-bang {
+  display: inline-block;
+  opacity: 0;
+  transform: translateY(28px) scale(0.85) rotate(-6deg);
+  animation: welcome-letter-in 0.65s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.welcome-bang {
+  color: var(--marista-yellow);
+  margin-left: 0.05em;
+  animation:
+    welcome-letter-in 0.65s cubic-bezier(0.34, 1.56, 0.64, 1) forwards,
+    welcome-bang-bounce 1.8s ease-in-out 1.2s infinite;
+}
+.welcome-sub {
+  margin: 0.4rem 0 0;
+  font-size: clamp(1.1rem, 2.5vw, 1.6rem);
+  color: rgba(255, 255, 255, 0.95);
+  font-weight: 500;
+  text-shadow: 0 2px 14px rgba(0, 0, 0, 0.65);
+  opacity: 0;
+  animation: welcome-sub-in 0.6s ease-out 0.9s forwards;
+}
+@keyframes welcome-eyebrow-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes welcome-letter-in {
+  0%   { opacity: 0; transform: translateY(28px) scale(0.85) rotate(-6deg); }
+  60%  { opacity: 1; transform: translateY(-6px) scale(1.08) rotate(2deg); }
+  100% { opacity: 1; transform: translateY(0) scale(1) rotate(0); }
+}
+@keyframes welcome-sub-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes welcome-bang-bounce {
+  0%, 60%, 100% { transform: translateY(0) rotate(0) scale(1); }
+  70%           { transform: translateY(-8px) rotate(-8deg) scale(1.15); }
+  80%           { transform: translateY(0)    rotate(6deg)  scale(1); }
+  90%           { transform: translateY(-4px) rotate(-3deg) scale(1.08); }
 }
 .reveal-hint {
   text-align: center;
