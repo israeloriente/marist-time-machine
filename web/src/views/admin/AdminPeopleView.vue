@@ -263,9 +263,20 @@ onMounted(async () => {
         <div v-else class="thumb-placeholder">?</div>
         <strong class="name">{{ p.display_name || "Sem nome" }}</strong>
         <span class="muted small">{{ p.face_count }} {{ p.face_count === 1 ? "foto" : "fotos" }}</span>
-        <div v-if="p.graduation_years?.length || p.classes?.length" class="meta-tags">
-          <span v-for="y in p.graduation_years" :key="`y-${y}`" class="tag tag-year">{{ y }}</span>
-          <span v-for="c in p.classes" :key="`c-${c}`" class="tag tag-class">{{ c }}</span>
+        <!-- Mostra o ano/turma canônicos da pessoa (curados). Só cai pros
+             valores derivados das fotos quando os canônicos estão vazios. -->
+        <div
+          v-if="p.graduation_year != null || p.class_letter"
+          class="meta-tags"
+        >
+          <span v-if="p.graduation_year != null" class="tag tag-year">
+            {{ p.graduation_year }}
+          </span>
+          <span v-if="p.class_letter" class="tag tag-class">{{ p.class_letter }}</span>
+        </div>
+        <div v-else-if="p.graduation_years?.length || p.classes?.length" class="meta-tags">
+          <span v-for="y in p.graduation_years" :key="`y-${y}`" class="tag tag-year derived">{{ y }}</span>
+          <span v-for="c in p.classes" :key="`c-${c}`" class="tag tag-class derived">{{ c }}</span>
         </div>
         <button
           v-if="status === 'rejected'"
@@ -391,6 +402,14 @@ onMounted(async () => {
 .tag-class {
   background: rgba(247, 201, 72, 0.18);
   color: #8a6913;
+}
+/* Derivado das fotos (estimativa) — apagado, com tracinho indicando que
+   não é o cadastro canônico da pessoa. */
+.tag.derived {
+  background: var(--surface-strong);
+  color: var(--muted);
+  border: 1px dashed var(--border);
+  font-weight: 600;
 }
 
 .tabs {
