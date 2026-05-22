@@ -255,6 +255,9 @@ export interface Person {
   // Derived from photo metadata (fallback)
   graduation_years?: number[];
   classes?: string[];
+  // Embedded thumbnail face (no extra /faces round-trip needed)
+  thumb_signed_url?: string | null;
+  thumb_bbox?: number[] | null;
 }
 
 export interface PeopleFilters {

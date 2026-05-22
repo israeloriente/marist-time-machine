@@ -27,6 +27,10 @@ class PersonOut(BaseModel):
     # Derived from photo metadata (fallback when canonical is null)
     graduation_years: list[int] = []
     classes: list[str] = []
+    # Thumbnail face embedded so the list view doesn't need an extra
+    # /people/{id}/faces round-trip per person. Null when no approved face.
+    thumb_signed_url: str | None = None
+    thumb_bbox: list[float] | None = None
 
 
 class PersonUpdate(BaseModel):
@@ -124,12 +128,30 @@ async def list_people(
                    null
                  ),
                  '{{}}'::text[]
-               ) as classes
+               ) as classes,
+               thumb.bbox as thumb_bbox,
+               thumb.storage_bucket as thumb_bucket,
+               thumb.storage_path as thumb_path,
+               thumb.metadata as thumb_metadata
         from public.people p
         left join public.faces f on f.person_id = p.id
         left join public.photos ph on ph.id = f.photo_id
+        -- Pick a single thumbnail face per person (approved photos only).
+        -- Prefer the admin-pinned thumbnail_face_id; otherwise highest score,
+        -- matching what the old per-person /faces call returned as fs[0].
+        left join lateral (
+          select tf.bbox, tp.storage_bucket, tp.storage_path, tp.metadata
+          from public.faces tf
+          join public.photos tp on tp.id = tf.photo_id
+          where tf.person_id = p.id
+            and tp.moderation_status = 'approved'
+          order by (tf.id = p.thumbnail_face_id) desc,
+                   tf.detection_score desc nulls last
+          limit 1
+        ) thumb on true
         where {' and '.join(where_clauses)}
-        group by p.id
+        group by p.id, thumb.bbox, thumb.storage_bucket,
+                 thumb.storage_path, thumb.metadata
         -- Named people first, alphabetical (PT-BR collation if available).
         -- Anonymous (NULL display_name) at the bottom, ordered by face count desc
         -- so the most-photographed unknowns surface first.
@@ -140,21 +162,36 @@ async def list_people(
           p.created_at desc
         limit ${len(params) - 1} offset ${len(params)}
     """
+    from ..services import storage as storage_svc
+    from .faces import _coerce_bbox
+
     rows = await db.fetch(sql, *params)
-    return [
-        PersonOut(
-            id=r["id"],
-            display_name=r["display_name"],
-            thumbnail_face_id=r["thumbnail_face_id"],
-            face_count=r["face_count"],
-            status=r["status"],
-            graduation_year=r["graduation_year"],
-            class_letter=r["class_letter"],
-            graduation_years=sorted(r["graduation_years"]) if r["graduation_years"] else [],
-            classes=sorted(r["classes"]) if r["classes"] else [],
+    out: list[PersonOut] = []
+    for r in rows:
+        thumb_url = None
+        thumb_bbox = None
+        if r["thumb_path"] is not None:
+            meta = storage_svc.coerce_metadata(r["thumb_metadata"])
+            thumb_url = storage_svc.thumb_signed_url(
+                meta, r["thumb_bucket"], r["thumb_path"]
+            )
+            thumb_bbox = _coerce_bbox(r["thumb_bbox"])
+        out.append(
+            PersonOut(
+                id=r["id"],
+                display_name=r["display_name"],
+                thumbnail_face_id=r["thumbnail_face_id"],
+                face_count=r["face_count"],
+                status=r["status"],
+                graduation_year=r["graduation_year"],
+                class_letter=r["class_letter"],
+                graduation_years=sorted(r["graduation_years"]) if r["graduation_years"] else [],
+                classes=sorted(r["classes"]) if r["classes"] else [],
+                thumb_signed_url=thumb_url,
+                thumb_bbox=thumb_bbox,
+            )
         )
-        for r in rows
-    ]
+    return out
 
 
 @router.get("/filters")

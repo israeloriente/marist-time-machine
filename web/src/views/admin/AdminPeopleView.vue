@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import CenteredNotice from "@/components/CenteredNotice.vue";
 import FaceThumb from "@/components/FaceThumb.vue";
-import { peopleApi, type AvailableFilters, type Face, type Person } from "@/services/api";
+import { peopleApi, type AvailableFilters, type Person } from "@/services/api";
 import { useNotifyStore } from "@/stores/notify";
 
 const notify = useNotifyStore();
@@ -12,7 +12,6 @@ const router = useRouter();
 
 const people = ref<Person[]>([]);
 const loading = ref(true);
-const thumbCache = ref<Record<string, Face | null>>({});
 
 const query = ref("");
 const year = ref<number | "">("");
@@ -41,18 +40,9 @@ async function load() {
     };
     if (year.value !== "") filters.year = year.value;
     if (klass.value) filters.class = klass.value;
+    // Thumbnails come embedded in the list response (thumb_signed_url +
+    // thumb_bbox), so no per-person /faces requests are needed here.
     people.value = await peopleApi.list(filters);
-    await Promise.all(
-      people.value.map(async (p) => {
-        if (thumbCache.value[p.id]) return;
-        try {
-          const fs = await peopleApi.faces(p.id);
-          thumbCache.value[p.id] = fs[0] ?? null;
-        } catch {
-          thumbCache.value[p.id] = null;
-        }
-      }),
-    );
   } finally {
     loading.value = false;
   }
@@ -254,9 +244,9 @@ onMounted(async () => {
         @drop="onDrop(p, $event)"
       >
         <FaceThumb
-          v-if="thumbCache[p.id]"
-          :src="thumbCache[p.id]!.signed_url"
-          :bbox="thumbCache[p.id]!.bbox"
+          v-if="p.thumb_signed_url && p.thumb_bbox"
+          :src="p.thumb_signed_url"
+          :bbox="p.thumb_bbox"
           :size="96"
           :padding="0.3"
         />
