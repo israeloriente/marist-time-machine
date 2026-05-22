@@ -730,18 +730,45 @@ async def random_photos(
 ) -> list[dict]:
     """Return random *image* photos (skip videos) for ambient slideshows."""
     where = [
-        "coalesce(metadata->>'media_type','image') = 'image'",
-        "moderation_status = 'approved'",
+        "coalesce(ph.metadata->>'media_type','image') = 'image'",
+        "ph.moderation_status = 'approved'",
     ]
     params: list = []
     if year is not None:
         params.append(year)
-        where.append(f"(metadata->>'graduation_year')::int = ${len(params)}")
+        i = len(params)
+        # A photo belongs to year X if it's tagged X at upload time, OR it
+        # contains a face of someone canonically of that year — a student with
+        # graduation_year = X, or a collaborator whose entry..exit range covers
+        # X. This lets untagged uploads still surface in the right turma once
+        # the people in them are identified via /contribute.
+        where.append(
+            f"""(
+              (ph.metadata->>'graduation_year' ~ '^\\d+$'
+               and (ph.metadata->>'graduation_year')::int = ${i})
+              or exists (
+                select 1
+                from public.faces f
+                join public.people p on p.id = f.person_id
+                where f.photo_id = ph.id
+                  and p.status = 'active'
+                  and (
+                    (p.person_type = 'student' and p.graduation_year = ${i})
+                    or (
+                      p.person_type = 'collaborator'
+                      and (p.entry_year is not null or p.exit_year is not null)
+                      and ${i} >= coalesce(p.entry_year, ${i})
+                      and ${i} <= coalesce(p.exit_year, ${i})
+                    )
+                  )
+              )
+            )"""
+        )
     params.append(limit)
     rows = await db.fetch(
         f"""
-        select id, storage_bucket, storage_path, metadata
-        from public.photos
+        select ph.id, ph.storage_bucket, ph.storage_path, ph.metadata
+        from public.photos ph
         where {' and '.join(where)}
         order by random()
         limit ${len(params)}

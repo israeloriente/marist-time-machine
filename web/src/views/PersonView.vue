@@ -15,6 +15,7 @@ import {
   type SuggestionGroup,
 } from "@/services/api";
 import { useNotifyStore } from "@/stores/notify";
+import { CLASS_LETTERS, collabYears, graduationYears } from "@/constants/people";
 
 const notify = useNotifyStore();
 
@@ -31,13 +32,15 @@ const error = ref<string | null>(null);
 const renameValue = ref("");
 const savingName = ref(false);
 
+const typeValue = ref<"student" | "collaborator">("student");
 const yearValue = ref<number | "">("");
 const classValue = ref<string>("");
+const entryValue = ref<number | "">("");
+const exitValue = ref<number | "">("");
 const savingGrad = ref(false);
 
-const currentYear = new Date().getFullYear();
-const graduationYears = Array.from({ length: 111 }, (_, i) => currentYear + 10 - i);
-const classes = ["A", "B", "C", "D", "E", "F"];
+const years = graduationYears();
+const collabYearsList = collabYears();
 
 async function load() {
   loading.value = true;
@@ -47,8 +50,11 @@ async function load() {
     // (admin needs to be able to view a rejected person to reactivate).
     person.value = await peopleApi.get(personId);
     renameValue.value = person.value.display_name ?? "";
+    typeValue.value = person.value.person_type ?? "student";
     yearValue.value = person.value.graduation_year ?? "";
     classValue.value = person.value.class_letter ?? "";
+    entryValue.value = person.value.entry_year ?? "";
+    exitValue.value = person.value.exit_year ?? "";
     [faces.value, photos.value, suggestions.value] = await Promise.all([
       peopleApi.faces(personId),
       peopleApi.photos(personId),
@@ -78,19 +84,54 @@ async function saveName() {
   }
 }
 
+function applyPersonUpdate(updated: Person) {
+  if (!person.value) return;
+  person.value.person_type = updated.person_type;
+  person.value.graduation_year = updated.graduation_year;
+  person.value.class_letter = updated.class_letter;
+  person.value.entry_year = updated.entry_year;
+  person.value.exit_year = updated.exit_year;
+}
+
+// Save the canonical year/class (student) or entry/exit range (collaborator),
+// depending on the current type. The server nulls the irrelevant side.
 async function saveGraduation() {
   if (!person.value) return;
   savingGrad.value = true;
   try {
-    const updated = await peopleApi.updateGraduation(
-      personId,
-      yearValue.value === "" ? null : (yearValue.value as number),
-      classValue.value || null,
-    );
-    person.value.graduation_year = updated.graduation_year;
-    person.value.class_letter = updated.class_letter;
+    const patch =
+      typeValue.value === "collaborator"
+        ? {
+            entry_year: entryValue.value === "" ? null : (entryValue.value as number),
+            exit_year: exitValue.value === "" ? null : (exitValue.value as number),
+          }
+        : {
+            graduation_year: yearValue.value === "" ? null : (yearValue.value as number),
+            class_letter: classValue.value || null,
+          };
+    applyPersonUpdate(await peopleApi.update(personId, patch));
   } catch (e) {
-    notify.error("Erro ao salvar formatura", e);
+    notify.error("Erro ao salvar", e);
+  } finally {
+    savingGrad.value = false;
+  }
+}
+
+// Flipping the type clears the other side's fields server-side; reflect that
+// locally so the UI doesn't show stale values.
+async function changeType(next: "student" | "collaborator") {
+  if (typeValue.value === next) return;
+  typeValue.value = next;
+  savingGrad.value = true;
+  try {
+    const updated = await peopleApi.update(personId, { person_type: next });
+    applyPersonUpdate(updated);
+    yearValue.value = updated.graduation_year ?? "";
+    classValue.value = updated.class_letter ?? "";
+    entryValue.value = updated.entry_year ?? "";
+    exitValue.value = updated.exit_year ?? "";
+  } catch (e) {
+    notify.error("Erro ao mudar tipo", e);
   } finally {
     savingGrad.value = false;
   }
@@ -151,6 +192,9 @@ async function approveSuggestion(g: SuggestionGroup) {
       final_name: final || undefined,
       final_graduation_year: g.suggested_graduation_year ?? null,
       final_class_letter: g.suggested_class_letter ?? null,
+      final_person_type: g.suggested_person_type ?? null,
+      final_entry_year: g.suggested_entry_year ?? null,
+      final_exit_year: g.suggested_exit_year ?? null,
     });
     await load();
   } catch (e) {
@@ -237,25 +281,64 @@ onMounted(load);
       </div>
 
       <section class="grad-section">
-        <h4>Formatura</h4>
-        <div class="grad-row">
+        <h4>{{ typeValue === "collaborator" ? "Colaborador(a)" : "Formatura" }}</h4>
+
+        <div class="type-toggle" role="group" aria-label="Tipo de pessoa">
+          <button
+            type="button"
+            :class="{ active: typeValue === 'student' }"
+            @click="changeType('student')"
+          >
+            Aluno(a)
+          </button>
+          <button
+            type="button"
+            :class="{ active: typeValue === 'collaborator' }"
+            @click="changeType('collaborator')"
+          >
+            Colaborador(a)
+          </button>
+        </div>
+
+        <!-- Aluno: ano de formatura + turma -->
+        <div v-if="typeValue === 'student'" class="grad-row">
           <label>
             <span>Ano</span>
             <select v-model.number="yearValue" class="input" @change="saveGraduation">
               <option value="">—</option>
-              <option v-for="y in graduationYears" :key="y" :value="y">{{ y }}</option>
+              <option v-for="y in years" :key="y" :value="y">{{ y }}</option>
             </select>
           </label>
           <label>
             <span>Turma</span>
             <select v-model="classValue" class="input" @change="saveGraduation">
               <option value="">—</option>
-              <option v-for="c in classes" :key="c" :value="c">{{ c }}</option>
+              <option v-for="c in CLASS_LETTERS" :key="c" :value="c">{{ c }}</option>
             </select>
           </label>
           <span v-if="savingGrad" class="muted small">salvando…</span>
         </div>
-        <p v-if="!person?.graduation_year && person?.graduation_years?.length" class="muted small fallback-hint">
+
+        <!-- Colaborador: faixa de anos (entrada–saída) -->
+        <div v-else class="grad-row">
+          <label>
+            <span>Entrada</span>
+            <select v-model.number="entryValue" class="input" @change="saveGraduation">
+              <option value="">—</option>
+              <option v-for="y in collabYearsList" :key="y" :value="y">{{ y }}</option>
+            </select>
+          </label>
+          <label>
+            <span>Saída</span>
+            <select v-model.number="exitValue" class="input" @change="saveGraduation">
+              <option value="">— atual</option>
+              <option v-for="y in collabYearsList" :key="y" :value="y">{{ y }}</option>
+            </select>
+          </label>
+          <span v-if="savingGrad" class="muted small">salvando…</span>
+        </div>
+
+        <p v-if="typeValue === 'student' && !person?.graduation_year && person?.graduation_years?.length" class="muted small fallback-hint">
           Derivado das fotos:
           <span v-for="y in person.graduation_years" :key="y" class="tag tag-year">{{ y }}</span>
           <span v-for="c in person.classes ?? []" :key="c" class="tag tag-class">{{ c }}</span>
@@ -436,6 +519,29 @@ onMounted(load);
   border-radius: 10px;
 }
 .grad-section h4 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.type-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin-bottom: 0.6rem;
+}
+.type-toggle button {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  border-radius: 8px;
+  padding: 0.45rem 0.5rem;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+  min-height: 38px;
+}
+.type-toggle button.active {
+  background: rgba(247, 201, 72, 0.18);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
 .grad-row {
   display: grid;
   grid-template-columns: 1fr 1fr auto;

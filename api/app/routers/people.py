@@ -21,9 +21,14 @@ class PersonOut(BaseModel):
     thumbnail_face_id: UUID | None
     face_count: int
     status: str = "active"  # 'active' | 'rejected'
+    # 'student' (graduation_year + class_letter) or 'collaborator' (entry/exit range)
+    person_type: str = "student"
     # Canonical graduation info (admin/community-curated)
     graduation_year: int | None = None
     class_letter: str | None = None
+    # Collaborator range (teacher/staff present from entry_year to exit_year)
+    entry_year: int | None = None
+    exit_year: int | None = None
     # Derived from photo metadata (fallback when canonical is null)
     graduation_years: list[int] = []
     classes: list[str] = []
@@ -37,8 +42,11 @@ class PersonUpdate(BaseModel):
     display_name: str | None = None
     is_hidden: bool | None = None  # deprecated; prefer status
     status: str | None = None  # 'active' | 'rejected'
+    person_type: str | None = None  # 'student' | 'collaborator'
     graduation_year: int | None = None
     class_letter: str | None = None
+    entry_year: int | None = None
+    exit_year: int | None = None
 
 
 class MergeRequest(BaseModel):
@@ -71,16 +79,33 @@ async def list_people(
     if year is not None:
         params.append(year)
         i = len(params)
-        # Priority: canonical p.graduation_year if set; otherwise derive from photos.
+        # Year matching, in priority order:
+        #  1. Student with a canonical graduation_year == the year.
+        #  2. Collaborator whose entry..exit range covers the year. An open
+        #     bound (null entry or null exit) is treated as "no limit on that
+        #     side" so a half-filled range still matches.
+        #  3. Person with no canonical year/range: fall back to the years of
+        #     the photos they appear in.
         where_clauses.append(
             f"""(
-              (p.graduation_year is not null and p.graduation_year = ${i})
+              (p.person_type = 'student'
+               and p.graduation_year is not null and p.graduation_year = ${i})
               or (
-                p.graduation_year is null and exists (
+                p.person_type = 'collaborator'
+                and (p.entry_year is not null or p.exit_year is not null)
+                and ${i} >= coalesce(p.entry_year, ${i})
+                and ${i} <= coalesce(p.exit_year, ${i})
+              )
+              or (
+                p.graduation_year is null
+                and not (p.person_type = 'collaborator'
+                         and (p.entry_year is not null or p.exit_year is not null))
+                and exists (
                   select 1
                   from public.faces f2
                   join public.photos ph2 on ph2.id = f2.photo_id
                   where f2.person_id = p.id
+                    and ph2.metadata->>'graduation_year' ~ '^\\d+$'
                     and (ph2.metadata->>'graduation_year')::int = ${i}
                 )
               )
@@ -109,7 +134,8 @@ async def list_people(
     params.append(offset)
     sql = f"""
         select p.id, p.display_name, p.thumbnail_face_id, p.status,
-               p.graduation_year, p.class_letter,
+               p.person_type, p.graduation_year, p.class_letter,
+               p.entry_year, p.exit_year,
                count(distinct f.id) as face_count,
                coalesce(
                  array_remove(
@@ -183,8 +209,11 @@ async def list_people(
                 thumbnail_face_id=r["thumbnail_face_id"],
                 face_count=r["face_count"],
                 status=r["status"],
+                person_type=r["person_type"],
                 graduation_year=r["graduation_year"],
                 class_letter=r["class_letter"],
+                entry_year=r["entry_year"],
+                exit_year=r["exit_year"],
                 graduation_years=sorted(r["graduation_years"]) if r["graduation_years"] else [],
                 classes=sorted(r["classes"]) if r["classes"] else [],
                 thumb_signed_url=thumb_url,
@@ -201,28 +230,53 @@ async def filters_available(_user: User = CurrentUser) -> dict:
     Used by the UI to populate filter dropdowns dynamically (so admin only
     sees options that actually have data).
     """
+    # Years/classes come from two sources, unioned:
+    #  - photo metadata (the upload-time hint), and
+    #  - canonical people fields (student graduation_year, plus the bounds of
+    #    collaborator entry/exit ranges) so years that only exist on a curated
+    #    person still show up in the dropdowns.
     row = await db.fetchrow(
         """
-        select
-          coalesce(
+        with photo_meta as (
+          select
             array_remove(
               array_agg(distinct (metadata->>'graduation_year')::int)
                 filter (where metadata ? 'graduation_year'
                         and metadata->>'graduation_year' ~ '^\\d+$'),
               null
-            ),
-            '{}'::int[]
-          ) as years,
-          coalesce(
+            ) as years,
             array_remove(
               array_agg(distinct upper(metadata->>'class'))
                 filter (where metadata ? 'class'
                         and metadata->>'class' <> ''),
               null
-            ),
+            ) as classes
+          from public.photos
+        ),
+        people_meta as (
+          select
+            array_remove(array_agg(distinct y), null) as years,
+            array_remove(array_agg(distinct class_letter), null) as classes
+          from public.people p
+          cross join lateral (
+            values (p.graduation_year), (p.entry_year), (p.exit_year)
+          ) as v(y)
+          where p.status = 'active'
+        )
+        select
+          coalesce(
+            (select array_agg(distinct e) from unnest(
+              coalesce(pm.years, '{}'::int[]) || coalesce(plm.years, '{}'::int[])
+            ) e),
+            '{}'::int[]
+          ) as years,
+          coalesce(
+            (select array_agg(distinct e) from unnest(
+              coalesce(pm.classes, '{}'::text[]) || coalesce(plm.classes, '{}'::text[])
+            ) e),
             '{}'::text[]
           ) as classes
-        from public.photos
+        from photo_meta pm cross join people_meta plm
         """
     )
     return {
@@ -278,7 +332,8 @@ async def get_person(person_id: UUID, _user: User = CurrentUser) -> PersonOut:
     row = await db.fetchrow(
         """
         select p.id, p.display_name, p.thumbnail_face_id, p.status,
-               p.graduation_year, p.class_letter,
+               p.person_type, p.graduation_year, p.class_letter,
+               p.entry_year, p.exit_year,
                (select count(*) from public.faces f where f.person_id = p.id) as face_count
         from public.people p where p.id = $1
         """,
@@ -298,8 +353,15 @@ async def update_person(
     sent = body.model_fields_set
     fields: list[str] = []
     args: list = []
+    set_cols: set[str] = set()
 
     def add(col: str, val):
+        # First write wins. The type-switch block below runs before the explicit
+        # field setters, so its intent (null the irrelevant side) takes priority
+        # over a stray graduation_year sent alongside a switch to collaborator.
+        if col in set_cols:
+            return
+        set_cols.add(col)
         args.append(val)
         fields.append(f"{col} = ${len(args)}")
 
@@ -314,6 +376,20 @@ async def update_person(
                 status_code=400, detail="status must be active|rejected"
             )
         add("status", body.status)
+    if "person_type" in sent and body.person_type is not None:
+        if body.person_type not in {"student", "collaborator"}:
+            raise HTTPException(
+                status_code=400, detail="person_type must be student|collaborator"
+            )
+        add("person_type", body.person_type)
+        # Switching type clears the other side's now-irrelevant fields so a
+        # collaborator doesn't keep a stale class, nor a student a stale range.
+        if body.person_type == "collaborator":
+            add("graduation_year", None)
+            add("class_letter", None)
+        else:
+            add("entry_year", None)
+            add("exit_year", None)
     if "graduation_year" in sent:
         add("graduation_year", body.graduation_year)
     if "class_letter" in sent:
@@ -321,6 +397,10 @@ async def update_person(
             "class_letter",
             body.class_letter.upper() if body.class_letter else None,
         )
+    if "entry_year" in sent:
+        add("entry_year", body.entry_year)
+    if "exit_year" in sent:
+        add("exit_year", body.exit_year)
 
     if not fields:
         raise HTTPException(status_code=400, detail="nothing to update")
@@ -332,7 +412,8 @@ async def update_person(
     row = await db.fetchrow(
         """
         select p.id, p.display_name, p.thumbnail_face_id, p.status,
-               p.graduation_year, p.class_letter,
+               p.person_type, p.graduation_year, p.class_letter,
+               p.entry_year, p.exit_year,
                (select count(*) from public.faces f where f.person_id = p.id) as face_count
         from public.people p where p.id = $1
         """,

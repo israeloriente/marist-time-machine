@@ -28,12 +28,39 @@ def _normalize(name: str) -> str:
     return name
 
 
+def resolve_type_fields(
+    person_type: str | None,
+    *,
+    graduation_year: int | None,
+    class_letter: str | None,
+    entry_year: int | None,
+    exit_year: int | None,
+) -> tuple[int | None, str | None, int | None, int | None]:
+    """Single source of truth for which year/class/range fields a person type keeps.
+
+    Students carry graduation_year + class_letter; collaborators carry an
+    entry/exit range. The irrelevant side is always nulled so it can't leak.
+    A null person_type is treated as a student (the table default).
+
+    Returns (graduation_year, class_letter, entry_year, exit_year).
+    """
+    if person_type == "collaborator":
+        return None, None, entry_year, exit_year
+    return graduation_year, class_letter, None, None
+
+
 class CreateSuggestion(BaseModel):
     person_id: UUID | None = None
     face_id: UUID | None = None
     suggested_name: str = Field(min_length=2, max_length=200)
+    # Student fields
     suggested_graduation_year: int | None = Field(default=None, ge=1900, le=2100)
     suggested_class_letter: str | None = Field(default=None, pattern="^[A-Fa-f]$")
+    # Person type + collaborator range. Defaults to None (= treat as student
+    # unless explicitly flagged) so older clients keep working unchanged.
+    suggested_person_type: str | None = Field(default=None, pattern="^(student|collaborator)$")
+    suggested_entry_year: int | None = Field(default=None, ge=1900, le=2100)
+    suggested_exit_year: int | None = Field(default=None, ge=1900, le=2100)
 
 
 class SuggestionOut(BaseModel):
@@ -44,6 +71,9 @@ class SuggestionOut(BaseModel):
     normalized_name: str
     suggested_graduation_year: int | None = None
     suggested_class_letter: str | None = None
+    suggested_person_type: str | None = None
+    suggested_entry_year: int | None = None
+    suggested_exit_year: int | None = None
     suggested_by: UUID | None
     status: str
     created_at: str
@@ -70,15 +100,25 @@ async def create_suggestion(body: CreateSuggestion, user: User = CurrentUser) ->
     normalized = _normalize(name)
 
     klass = body.suggested_class_letter.upper() if body.suggested_class_letter else None
+    # One rule for which fields a type keeps; the rest are nulled.
+    grad_year, klass, entry_year, exit_year = resolve_type_fields(
+        body.suggested_person_type,
+        graduation_year=body.suggested_graduation_year,
+        class_letter=klass,
+        entry_year=body.suggested_entry_year,
+        exit_year=body.suggested_exit_year,
+    )
     try:
         row = await db.fetchrow(
             """
             insert into public.name_suggestions
               (person_id, face_id, suggested_name, normalized_name, suggested_by,
-               suggested_graduation_year, suggested_class_letter)
-            values ($1, $2, $3, $4, $5, $6, $7)
+               suggested_graduation_year, suggested_class_letter,
+               suggested_person_type, suggested_entry_year, suggested_exit_year)
+            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
             returning id, person_id, face_id, suggested_name, normalized_name,
                       suggested_graduation_year, suggested_class_letter,
+                      suggested_person_type, suggested_entry_year, suggested_exit_year,
                       suggested_by, status, created_at
             """,
             body.person_id,
@@ -86,8 +126,11 @@ async def create_suggestion(body: CreateSuggestion, user: User = CurrentUser) ->
             name,
             normalized,
             UUID(user.id),
-            body.suggested_graduation_year,
+            grad_year,
             klass,
+            body.suggested_person_type,
+            entry_year,
+            exit_year,
         )
     except Exception as exc:
         # Unique violation = same user already suggested this name for this target.
@@ -104,6 +147,9 @@ async def create_suggestion(body: CreateSuggestion, user: User = CurrentUser) ->
         normalized_name=row["normalized_name"],
         suggested_graduation_year=row["suggested_graduation_year"],
         suggested_class_letter=row["suggested_class_letter"],
+        suggested_person_type=row["suggested_person_type"],
+        suggested_entry_year=row["suggested_entry_year"],
+        suggested_exit_year=row["suggested_exit_year"],
         suggested_by=row["suggested_by"],
         status=row["status"],
         created_at=row["created_at"].isoformat(),
@@ -118,6 +164,9 @@ class GroupedSuggestion(BaseModel):
     normalized_name: str
     suggested_graduation_year: int | None = None
     suggested_class_letter: str | None = None
+    suggested_person_type: str | None = None
+    suggested_entry_year: int | None = None
+    suggested_exit_year: int | None = None
     vote_count: int
     first_suggested_at: str
     last_suggested_at: str
@@ -165,6 +214,9 @@ class NameVote(BaseModel):
     normalized_name: str
     suggested_graduation_year: int | None = None
     suggested_class_letter: str | None = None
+    suggested_person_type: str | None = None
+    suggested_entry_year: int | None = None
+    suggested_exit_year: int | None = None
     vote_count: int
     first_at: str
     last_at: str
@@ -206,6 +258,15 @@ async def list_pending_by_target(_user: User = RequireAdmin) -> list[TargetWithS
             (array_agg(suggested_class_letter order by created_at desc)
               filter (where suggested_class_letter is not null))[1]
               as suggested_class_letter,
+            (array_agg(suggested_person_type order by created_at desc)
+              filter (where suggested_person_type is not null))[1]
+              as suggested_person_type,
+            (array_agg(suggested_entry_year order by created_at desc)
+              filter (where suggested_entry_year is not null))[1]
+              as suggested_entry_year,
+            (array_agg(suggested_exit_year order by created_at desc)
+              filter (where suggested_exit_year is not null))[1]
+              as suggested_exit_year,
             count(*) as vote_count,
             min(created_at) as first_at,
             max(created_at) as last_at,
@@ -235,6 +296,9 @@ async def list_pending_by_target(_user: User = RequireAdmin) -> list[TargetWithS
                 normalized_name=r["normalized_name"],
                 suggested_graduation_year=r["suggested_graduation_year"],
                 suggested_class_letter=r["suggested_class_letter"],
+                suggested_person_type=r["suggested_person_type"],
+                suggested_entry_year=r["suggested_entry_year"],
+                suggested_exit_year=r["suggested_exit_year"],
                 vote_count=r["vote_count"],
                 first_at=r["first_at"].isoformat(),
                 last_at=r["last_at"].isoformat(),
@@ -329,6 +393,15 @@ async def list_for_person(person_id: UUID, _user: User = RequireAdmin) -> list[G
           (array_agg(suggested_class_letter order by created_at desc)
             filter (where suggested_class_letter is not null))[1]
             as suggested_class_letter,
+          (array_agg(suggested_person_type order by created_at desc)
+            filter (where suggested_person_type is not null))[1]
+            as suggested_person_type,
+          (array_agg(suggested_entry_year order by created_at desc)
+            filter (where suggested_entry_year is not null))[1]
+            as suggested_entry_year,
+          (array_agg(suggested_exit_year order by created_at desc)
+            filter (where suggested_exit_year is not null))[1]
+            as suggested_exit_year,
           count(*) as vote_count,
           min(created_at) as first_at,
           max(created_at) as last_at,
@@ -348,6 +421,9 @@ async def list_for_person(person_id: UUID, _user: User = RequireAdmin) -> list[G
             normalized_name=r["normalized_name"],
             suggested_graduation_year=r["suggested_graduation_year"],
             suggested_class_letter=r["suggested_class_letter"],
+            suggested_person_type=r["suggested_person_type"],
+            suggested_entry_year=r["suggested_entry_year"],
+            suggested_exit_year=r["suggested_exit_year"],
             vote_count=r["vote_count"],
             first_suggested_at=r["first_at"].isoformat(),
             last_suggested_at=r["last_at"].isoformat(),
@@ -362,6 +438,9 @@ class ApproveRequest(BaseModel):
     final_name: str | None = None
     final_graduation_year: int | None = None
     final_class_letter: str | None = None
+    final_person_type: str | None = Field(default=None, pattern="^(student|collaborator)$")
+    final_entry_year: int | None = None
+    final_exit_year: int | None = None
 
 
 @router.post("/{suggestion_id}/approve")
@@ -395,6 +474,31 @@ async def approve(suggestion_id: UUID, body: ApproveRequest | None = None, user:
         if body and body.final_class_letter
         else sugg["suggested_class_letter"]
     )
+    # Resolve person type + collaborator range, then run everything through the
+    # same rule used at suggestion-create time so the irrelevant side is nulled
+    # exactly once, in one place.
+    final_type = (
+        body.final_person_type
+        if body and body.final_person_type
+        else sugg["suggested_person_type"]
+    )
+    final_entry = (
+        body.final_entry_year
+        if body and body.final_entry_year is not None
+        else sugg["suggested_entry_year"]
+    )
+    final_exit = (
+        body.final_exit_year
+        if body and body.final_exit_year is not None
+        else sugg["suggested_exit_year"]
+    )
+    final_year, final_class, final_entry, final_exit = resolve_type_fields(
+        final_type,
+        graduation_year=final_year,
+        class_letter=final_class,
+        entry_year=final_entry,
+        exit_year=final_exit,
+    )
 
     person_id = sugg["person_id"]
 
@@ -409,13 +513,17 @@ async def approve(suggestion_id: UUID, body: ApproveRequest | None = None, user:
         new_person = await db.fetchrow(
             """
             insert into public.people (display_name, thumbnail_face_id,
-                                       graduation_year, class_letter)
-            values ($1, $2, $3, $4) returning id
+                                       graduation_year, class_letter,
+                                       person_type, entry_year, exit_year)
+            values ($1, $2, $3, $4, coalesce($5, 'student'), $6, $7) returning id
             """,
             final_name,
             sugg["face_id"],
             final_year,
             final_class,
+            final_type,
+            final_entry,
+            final_exit,
         )
         assert new_person is not None
         person_id = new_person["id"]
@@ -425,18 +533,37 @@ async def approve(suggestion_id: UUID, body: ApproveRequest | None = None, user:
             sugg["face_id"],
         )
     else:
+        # coalesce keeps existing values when an override is null — but on a
+        # type *switch* the now-irrelevant side must be force-nulled (a person
+        # flipped student->collaborator shouldn't keep their old class). The
+        # clear flags fire only when an explicit final_type says which side
+        # is irrelevant.
+        clear_student = final_type == "collaborator"
+        clear_collab = final_type == "student"
         await db.execute(
             """
             update public.people
                set display_name = $1,
-                   graduation_year = coalesce($2, graduation_year),
-                   class_letter    = coalesce($3, class_letter)
+                   graduation_year = case when $8 then null
+                                         else coalesce($2, graduation_year) end,
+                   class_letter    = case when $8 then null
+                                         else coalesce($3, class_letter) end,
+                   person_type     = coalesce($5, person_type),
+                   entry_year      = case when $9 then null
+                                         else coalesce($6, entry_year) end,
+                   exit_year       = case when $9 then null
+                                         else coalesce($7, exit_year) end
              where id = $4
             """,
             final_name,
             final_year,
             final_class,
             person_id,
+            final_type,
+            final_entry,
+            final_exit,
+            clear_student,
+            clear_collab,
         )
 
     # 1) Approve siblings with same target + same normalized_name (people

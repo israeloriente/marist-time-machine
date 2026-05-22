@@ -60,12 +60,11 @@ const openSections = ref<Record<Status, boolean>>({
   duplicate: false,
 });
 
+// Ano/turma são opcionais: servem só como dica no upload. A associação
+// canônica de quem aparece (aluno ou colaborador) acontece depois no
+// /contribute. Por isso o envio não exige mais ano/turma preenchidos.
 const canSubmit = computed(
-  () =>
-    !busy.value &&
-    queue.value.some((q) => q.status === "pending") &&
-    graduationYear.value !== "" &&
-    classLetter.value !== "",
+  () => !busy.value && queue.value.some((q) => q.status === "pending"),
 );
 
 // Single-pass tally so 100+ items don't trigger N filter() runs per tick.
@@ -226,9 +225,15 @@ async function processOne(item: QueuedFile) {
   item.uploadPct = 0;
   item.abort = new AbortController();
   try {
+    // Only include year/class when actually picked — an empty value would
+    // otherwise be stored and break the `(metadata->>'graduation_year')::int`
+    // casts on the server.
+    const meta: Record<string, unknown> = {};
+    if (graduationYear.value !== "") meta.graduation_year = graduationYear.value;
+    if (classLetter.value) meta.class = classLetter.value;
     const res = await uploadPhoto(
       item.file,
-      { graduation_year: graduationYear.value, class: classLetter.value },
+      meta,
       {
         onUploadProgress: (pct) => {
           item.uploadPct = pct;
@@ -365,23 +370,27 @@ onBeforeUnmount(() => {
       pra reconhecimento facial.
     </p>
 
-    <!-- Metadata -->
+    <!-- Metadata (opcional) -->
     <div class="form-grid">
       <label>
-        <span>Ano de formatura <em>*</em></span>
-        <select v-model.number="graduationYear" class="input" required>
-          <option value="" disabled>Selecione</option>
+        <span>Ano de formatura</span>
+        <select v-model.number="graduationYear" class="input">
+          <option value="">— Não sei agora</option>
           <option v-for="y in graduationYears" :key="y" :value="y">{{ y }}</option>
         </select>
       </label>
       <label>
-        <span>Turma <em>*</em></span>
-        <select v-model="classLetter" class="input" required>
-          <option value="" disabled>Selecione</option>
+        <span>Turma</span>
+        <select v-model="classLetter" class="input">
+          <option value="">— Não sei agora</option>
           <option v-for="c in classes" :key="c" :value="c">{{ c }}</option>
         </select>
       </label>
     </div>
+    <p class="muted small meta-hint">
+      Ano e turma são opcionais. Quem aparece nas fotos pode ser identificado
+      depois em <strong>Ajude a identificar</strong>.
+    </p>
 
     <!-- Drop zone -->
     <div
@@ -604,8 +613,9 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 0.75rem;
-  margin: 1rem 0 1rem;
+  margin: 1rem 0 0.5rem;
 }
+.meta-hint { margin: 0 0 1rem; }
 .form-grid label {
   display: flex;
   flex-direction: column;

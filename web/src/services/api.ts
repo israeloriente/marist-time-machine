@@ -243,15 +243,22 @@ export async function uploadPhoto(
 
 // ---------- People / Faces ----------
 
+export type PersonType = "student" | "collaborator";
+
 export interface Person {
   id: string;
   display_name: string | null;
   thumbnail_face_id: string | null;
   face_count: number;
   status?: "active" | "rejected";
+  // 'student' (graduation_year + class_letter) or 'collaborator' (entry/exit range)
+  person_type?: PersonType;
   // Canonical (admin/community-curated)
   graduation_year?: number | null;
   class_letter?: string | null;
+  // Collaborator range (present from entry_year to exit_year)
+  entry_year?: number | null;
+  exit_year?: number | null;
   // Derived from photo metadata (fallback)
   graduation_years?: number[];
   classes?: string[];
@@ -342,6 +349,18 @@ export const peopleApi = {
       graduation_year,
       class_letter,
     })).data,
+  // General partial update — used to set person_type and the collaborator
+  // entry/exit range. Only the keys present are sent.
+  update: async (
+    personId: string,
+    patch: {
+      person_type?: PersonType;
+      graduation_year?: number | null;
+      class_letter?: string | null;
+      entry_year?: number | null;
+      exit_year?: number | null;
+    },
+  ): Promise<Person> => (await api.patch<Person>(`/people/${personId}`, patch)).data,
   merge: async (sourceId: string, targetId: string): Promise<void> => {
     await api.post("/people/merge", { source_id: sourceId, target_id: targetId });
   },
@@ -380,6 +399,9 @@ export interface SuggestionGroup {
   normalized_name: string;
   suggested_graduation_year?: number | null;
   suggested_class_letter?: string | null;
+  suggested_person_type?: PersonType | null;
+  suggested_entry_year?: number | null;
+  suggested_exit_year?: number | null;
   vote_count: number;
   first_suggested_at: string;
   last_suggested_at: string;
@@ -392,6 +414,9 @@ export interface NameVote {
   normalized_name: string;
   suggested_graduation_year?: number | null;
   suggested_class_letter?: string | null;
+  suggested_person_type?: PersonType | null;
+  suggested_entry_year?: number | null;
+  suggested_exit_year?: number | null;
   vote_count: number;
   first_at: string;
   last_at: string;
@@ -587,7 +612,13 @@ export const suggestionsApi = {
   create: async (
     target: { person_id?: string; face_id?: string },
     suggested_name: string,
-    extras?: { suggested_graduation_year?: number | null; suggested_class_letter?: string | null },
+    extras?: {
+      suggested_graduation_year?: number | null;
+      suggested_class_letter?: string | null;
+      suggested_person_type?: PersonType | null;
+      suggested_entry_year?: number | null;
+      suggested_exit_year?: number | null;
+    },
   ) =>
     (
       await api.post("/suggestions", {
@@ -595,6 +626,9 @@ export const suggestionsApi = {
         suggested_name,
         suggested_graduation_year: extras?.suggested_graduation_year ?? null,
         suggested_class_letter: extras?.suggested_class_letter ?? null,
+        suggested_person_type: extras?.suggested_person_type ?? null,
+        suggested_entry_year: extras?.suggested_entry_year ?? null,
+        suggested_exit_year: extras?.suggested_exit_year ?? null,
       })
     ).data,
   pending: async (): Promise<SuggestionGroup[]> =>
@@ -609,12 +643,18 @@ export const suggestionsApi = {
       final_name?: string;
       final_graduation_year?: number | null;
       final_class_letter?: string | null;
+      final_person_type?: PersonType | null;
+      final_entry_year?: number | null;
+      final_exit_year?: number | null;
     },
   ) => {
     await api.post(`/suggestions/${suggestion_id}/approve`, {
       final_name: overrides?.final_name ?? null,
       final_graduation_year: overrides?.final_graduation_year ?? null,
       final_class_letter: overrides?.final_class_letter ?? null,
+      final_person_type: overrides?.final_person_type ?? null,
+      final_entry_year: overrides?.final_entry_year ?? null,
+      final_exit_year: overrides?.final_exit_year ?? null,
     });
   },
   reject: async (suggestion_id: string) => {

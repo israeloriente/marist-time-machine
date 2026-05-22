@@ -131,16 +131,22 @@ const currentTargetSuggested = computed(() => {
 
 async function onSuggestSubmit(payload: {
   name: string;
+  person_type: "student" | "collaborator";
   year: number | null;
   class_letter: string | null;
+  entry_year: number | null;
+  exit_year: number | null;
 }) {
   if (!dialogTarget.value) return;
   const tgt = dialogTarget.value;
   const apiTarget = tgt.kind === "person" ? { person_id: tgt.id } : { face_id: tgt.id };
   try {
     await suggestionsApi.create(apiTarget, payload.name, {
+      suggested_person_type: payload.person_type,
       suggested_graduation_year: payload.year,
       suggested_class_letter: payload.class_letter,
+      suggested_entry_year: payload.entry_year,
+      suggested_exit_year: payload.exit_year,
     });
     suggested.value[tgt.id] = payload.name;
     saveSuggested();

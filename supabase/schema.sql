@@ -1,0 +1,128 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.faces (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  photo_id uuid NOT NULL,
+  person_id uuid,
+  bbox jsonb NOT NULL,
+  landmarks jsonb,
+  detection_score real,
+  embedding USER-DEFINED NOT NULL,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  is_rejected boolean NOT NULL DEFAULT false,
+  rejected_at timestamp with time zone,
+  rejected_by uuid,
+  CONSTRAINT faces_pkey PRIMARY KEY (id),
+  CONSTRAINT faces_photo_id_fkey FOREIGN KEY (photo_id) REFERENCES public.photos(id),
+  CONSTRAINT faces_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.people(id),
+  CONSTRAINT faces_rejected_by_fkey FOREIGN KEY (rejected_by) REFERENCES auth.users(id)
+);
+CREATE TABLE public.name_suggestions (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  person_id uuid,
+  face_id uuid,
+  suggested_name text NOT NULL,
+  normalized_name text NOT NULL,
+  suggested_by uuid,
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  resolved_at timestamp with time zone,
+  resolved_by uuid,
+  suggested_graduation_year integer CHECK (suggested_graduation_year IS NULL OR suggested_graduation_year >= 1900 AND suggested_graduation_year <= 2100),
+  suggested_class_letter text CHECK (suggested_class_letter IS NULL OR suggested_class_letter ~ '^[A-F]$'::text),
+  suggested_person_type text CHECK (suggested_person_type IS NULL OR suggested_person_type = ANY (ARRAY['student'::text, 'collaborator'::text])),
+  suggested_entry_year integer CHECK (suggested_entry_year IS NULL OR suggested_entry_year >= 1900 AND suggested_entry_year <= 2100),
+  suggested_exit_year integer CHECK (suggested_exit_year IS NULL OR suggested_exit_year >= 1900 AND suggested_exit_year <= 2100),
+  CONSTRAINT name_suggestions_pkey PRIMARY KEY (id),
+  CONSTRAINT name_suggestions_person_id_fkey FOREIGN KEY (person_id) REFERENCES public.people(id),
+  CONSTRAINT name_suggestions_face_id_fkey FOREIGN KEY (face_id) REFERENCES public.faces(id),
+  CONSTRAINT name_suggestions_suggested_by_fkey FOREIGN KEY (suggested_by) REFERENCES auth.users(id),
+  CONSTRAINT name_suggestions_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES auth.users(id)
+);
+CREATE TABLE public.people (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  display_name text,
+  thumbnail_face_id uuid,
+  is_hidden boolean NOT NULL DEFAULT false,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  graduation_year integer CHECK (graduation_year IS NULL OR graduation_year >= 1900 AND graduation_year <= 2100),
+  class_letter text CHECK (class_letter IS NULL OR class_letter ~ '^[A-F]$'::text),
+  status text NOT NULL DEFAULT 'active'::text CHECK (status = ANY (ARRAY['active'::text, 'rejected'::text])),
+  person_type text NOT NULL DEFAULT 'student'::text CHECK (person_type = ANY (ARRAY['student'::text, 'collaborator'::text])),
+  entry_year integer CHECK (entry_year IS NULL OR entry_year >= 1900 AND entry_year <= 2100),
+  exit_year integer CHECK (exit_year IS NULL OR exit_year >= 1900 AND exit_year <= 2100),
+  CONSTRAINT people_pkey PRIMARY KEY (id),
+  CONSTRAINT people_thumbnail_face_fk FOREIGN KEY (thumbnail_face_id) REFERENCES public.faces(id)
+);
+CREATE TABLE public.photos (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  storage_bucket text NOT NULL DEFAULT 'photos'::text,
+  storage_path text NOT NULL,
+  original_filename text,
+  uploaded_by uuid,
+  uploaded_at timestamp with time zone NOT NULL DEFAULT now(),
+  width integer,
+  height integer,
+  metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+  processed_at timestamp with time zone,
+  processing_error text,
+  content_hash text,
+  moderation_status text NOT NULL DEFAULT 'pending'::text CHECK (moderation_status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text])),
+  moderation_note text,
+  moderated_at timestamp with time zone,
+  moderated_by uuid,
+  CONSTRAINT photos_pkey PRIMARY KEY (id),
+  CONSTRAINT photos_uploaded_by_fkey FOREIGN KEY (uploaded_by) REFERENCES auth.users(id),
+  CONSTRAINT photos_moderated_by_fkey FOREIGN KEY (moderated_by) REFERENCES auth.users(id)
+);
+CREATE TABLE public.reports (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  reporter_id uuid NOT NULL,
+  reporter_email text,
+  photo_id uuid,
+  face_id uuid,
+  reason text NOT NULL CHECK (char_length(reason) >= 1 AND char_length(reason) <= 2000),
+  contact_info text,
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'resolved_removed'::text, 'resolved_rejected'::text])),
+  resolution_note text,
+  resolved_at timestamp with time zone,
+  resolved_by uuid,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT reports_pkey PRIMARY KEY (id),
+  CONSTRAINT reports_reporter_id_fkey FOREIGN KEY (reporter_id) REFERENCES auth.users(id),
+  CONSTRAINT reports_photo_id_fkey FOREIGN KEY (photo_id) REFERENCES public.photos(id),
+  CONSTRAINT reports_face_id_fkey FOREIGN KEY (face_id) REFERENCES public.faces(id),
+  CONSTRAINT reports_resolved_by_fkey FOREIGN KEY (resolved_by) REFERENCES auth.users(id)
+);
+CREATE TABLE public.songs (
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  youtube_id text NOT NULL,
+  title text,
+  channel text,
+  caption text,
+  thumbnail_url text,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  moderation_status text NOT NULL DEFAULT 'pending'::text CHECK (moderation_status = ANY (ARRAY['pending'::text, 'approved'::text, 'rejected'::text])),
+  moderation_note text,
+  moderated_at timestamp with time zone,
+  moderated_by uuid,
+  CONSTRAINT songs_pkey PRIMARY KEY (id),
+  CONSTRAINT songs_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id),
+  CONSTRAINT songs_moderated_by_fkey FOREIGN KEY (moderated_by) REFERENCES auth.users(id)
+);
+CREATE TABLE public.user_profiles (
+  user_id uuid NOT NULL,
+  graduation_year integer NOT NULL CHECK (graduation_year >= 1900 AND graduation_year <= 2100),
+  class_letter text NOT NULL CHECK (class_letter ~ '^[A-F]$'::text),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  terms_accepted_at timestamp with time zone,
+  terms_version text,
+  CONSTRAINT user_profiles_pkey PRIMARY KEY (user_id),
+  CONSTRAINT user_profiles_user_id_fkey FOREIGN KEY (user_id) REFERENCES auth.users(id)
+);

@@ -8,6 +8,7 @@ import {
   type NameVote,
   type TargetWithSuggestions,
 } from "@/services/api";
+import { formatCollabRange } from "@/constants/people";
 import { useNotifyStore } from "@/stores/notify";
 
 const notify = useNotifyStore();
@@ -39,6 +40,9 @@ async function approveVote(target: TargetWithSuggestions, vote: NameVote) {
       final_name: final || undefined,
       final_graduation_year: vote.suggested_graduation_year ?? null,
       final_class_letter: vote.suggested_class_letter ?? null,
+      final_person_type: vote.suggested_person_type ?? null,
+      final_entry_year: vote.suggested_entry_year ?? null,
+      final_exit_year: vote.suggested_exit_year ?? null,
     });
     await load();
   } catch (e) {
@@ -117,6 +121,10 @@ onMounted(load);
           <div class="vote-name">
             <strong>{{ v.suggested_name }}</strong>
             <div class="vote-meta">
+              <span v-if="v.suggested_person_type === 'collaborator'" class="tag tag-collab">
+                Colaborador<template v-if="formatCollabRange(v.suggested_entry_year, v.suggested_exit_year)">
+                  · {{ formatCollabRange(v.suggested_entry_year, v.suggested_exit_year) }}</template>
+              </span>
               <span v-if="v.suggested_graduation_year" class="tag tag-year">
                 {{ v.suggested_graduation_year }}
               </span>
@@ -205,6 +213,7 @@ onMounted(load);
 }
 .tag-year { background: rgba(14, 109, 194, 0.12); color: var(--marista-blue); }
 .tag-class { background: rgba(247, 201, 72, 0.22); color: #8a6913; }
+.tag-collab { background: rgba(124, 58, 237, 0.14); color: #6d28d9; }
 .vote-ops { display: flex; gap: 0.35rem; flex-wrap: wrap; }
 .button.small {
   min-height: 32px;

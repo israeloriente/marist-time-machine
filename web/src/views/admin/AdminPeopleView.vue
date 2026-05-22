@@ -4,6 +4,7 @@ import { useRouter } from "vue-router";
 import CenteredNotice from "@/components/CenteredNotice.vue";
 import FaceThumb from "@/components/FaceThumb.vue";
 import { peopleApi, type AvailableFilters, type Person } from "@/services/api";
+import { formatCollabRange } from "@/constants/people";
 import { useNotifyStore } from "@/stores/notify";
 
 const notify = useNotifyStore();
@@ -253,10 +254,20 @@ onMounted(async () => {
         <div v-else class="thumb-placeholder">?</div>
         <strong class="name">{{ p.display_name || "Sem nome" }}</strong>
         <span class="muted small">{{ p.face_count }} {{ p.face_count === 1 ? "foto" : "fotos" }}</span>
-        <!-- Mostra o ano/turma canônicos da pessoa (curados). Só cai pros
-             valores derivados das fotos quando os canônicos estão vazios. -->
+        <!-- Mostra o ano/turma canônicos da pessoa (curados). Colaboradores
+             usam faixa de anos. Só cai pros valores derivados das fotos
+             quando não há nada canônico. -->
         <div
-          v-if="p.graduation_year != null || p.class_letter"
+          v-if="p.person_type === 'collaborator'"
+          class="meta-tags"
+        >
+          <span class="tag tag-collab">
+            Colaborador<template v-if="formatCollabRange(p.entry_year, p.exit_year)">
+              · {{ formatCollabRange(p.entry_year, p.exit_year) }}</template>
+          </span>
+        </div>
+        <div
+          v-else-if="p.graduation_year != null || p.class_letter"
           class="meta-tags"
         >
           <span v-if="p.graduation_year != null" class="tag tag-year">
@@ -392,6 +403,10 @@ onMounted(async () => {
 .tag-class {
   background: rgba(247, 201, 72, 0.18);
   color: #8a6913;
+}
+.tag-collab {
+  background: rgba(124, 58, 237, 0.14);
+  color: #6d28d9;
 }
 /* Derivado das fotos (estimativa) — apagado, com tracinho indicando que
    não é o cadastro canônico da pessoa. */
