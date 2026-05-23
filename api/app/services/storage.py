@@ -2,11 +2,38 @@
 
 from __future__ import annotations
 
+import os
+import re
+import unicodedata
+
 from supabase import Client, create_client
 
 from ..config import settings
 
 _client: Client | None = None
+
+# Supabase Storage rejects object keys with characters outside a conservative
+# set (it returns 400 InvalidKey). Non-ASCII (ã, º), exotic whitespace like the
+# narrow no-break space U+202F, and most punctuation all trip it. We keep only
+# a safe subset for the *storage key* — the human-readable name is preserved
+# separately in photos.original_filename.
+_KEY_SAFE = re.compile(r"[^A-Za-z0-9._-]+")
+
+
+def sanitize_key_name(name: str) -> str:
+    """Make a single path segment safe to use as a Supabase Storage key.
+
+    Strips the directory part, transliterates accents to ASCII, collapses any
+    run of unsafe characters to a single '-', and guarantees a non-empty result.
+    """
+    name = os.path.basename(name or "")
+    # Decompose accents (ã -> a + combining tilde) then drop the combining marks.
+    name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode("ascii")
+    root, dot, ext = name.rpartition(".")
+    stem, ext = (root, ext) if dot else (name, "")
+    stem = _KEY_SAFE.sub("-", stem).strip("-._") or "upload"
+    ext = _KEY_SAFE.sub("", ext)
+    return f"{stem}.{ext}" if ext else stem
 
 
 def storage_client() -> Client:

@@ -111,7 +111,13 @@ async def upload_photo(
         # stored object's name matches its actual bytes.
         root, _, _ = safe_name.rpartition(".")
         safe_name = (root or safe_name) + upload_ext
-    path = f"{user.id}/{safe_name}"
+    # The original filename (kept in original_filename below) may contain
+    # accents, exotic whitespace, or punctuation that Supabase Storage rejects
+    # as an InvalidKey. Build the storage key from a sanitized variant. Prefix
+    # with a slice of the content hash so two differently-named files that
+    # sanitize to the same key (e.g. both all-CJK) can't overwrite each other.
+    key_name = storage.sanitize_key_name(safe_name)
+    path = f"{user.id}/{content_hash[:12]}-{key_name}"
     storage.storage_client().storage.from_("photos").upload(
         path,
         payload,
