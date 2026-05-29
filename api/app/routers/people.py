@@ -61,6 +61,7 @@ async def list_people(
     year: int | None = None,
     klass: str | None = Query(None, alias="class"),
     status_filter: str = Query("active", alias="status"),
+    q: str | None = Query(None, description="Filter by display_name (ILIKE)"),
     _user: User = CurrentUser,
 ) -> list[PersonOut]:
     """List people with derived graduation_years + classes from their photos.
@@ -70,11 +71,19 @@ async def list_people(
       from regular queries but admin can list them to reactivate.
     - year: only people who appear in at least one photo tagged with this year
     - klass: only people who appear in at least one photo of this class (A-F)
+    - q: case-insensitive substring match on display_name. Enables server-side
+      search so paginated callers (e.g. the person picker) can search without
+      pulling the whole list.
     """
     if status_filter not in {"active", "rejected"}:
         raise HTTPException(status_code=400, detail="status must be active|rejected")
     params: list[object] = [status_filter]
     where_clauses = [f"p.status = $1"]
+
+    if q and q.strip():
+        params.append(f"%{q.strip()}%")
+        i = len(params)
+        where_clauses.append(f"p.display_name ilike ${i}")
 
     if year is not None:
         params.append(year)

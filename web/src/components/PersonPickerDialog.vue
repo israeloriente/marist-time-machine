@@ -1,7 +1,9 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import FaceThumb from "@/components/FaceThumb.vue";
 import { peopleApi, type Person } from "@/services/api";
+
+const PAGE_SIZE = 100;
 
 const props = withDefaults(
   defineProps<{
@@ -25,32 +27,90 @@ const emit = defineEmits<{
 }>();
 
 const people = ref<Person[]>([]);
-const loading = ref(false);
+const loading = ref(false); // initial page / search reload
+const loadingMore = ref(false); // appending next page
+const hasMore = ref(false);
 const query = ref("");
 const selected = ref<Person | null>(null);
+const sentinel = ref<HTMLElement | null>(null);
 
-async function load() {
-  loading.value = true;
-  try {
-    // Thumbnails come embedded in the /people response (thumb_signed_url +
-    // thumb_bbox), so no per-person /faces requests are needed here.
-    const list = await peopleApi.list();
-    people.value = list
-      .filter((p) => p.id !== props.excludeId)
-      .filter((p) => (props.onlyNamed ? !!p.display_name : true));
-  } finally {
-    loading.value = false;
-  }
+let offset = 0;
+// Bumped on every reload() so a slow in-flight request from a previous search
+// term can't overwrite results for the current one.
+let loadToken = 0;
+let searchDebounce: ReturnType<typeof setTimeout> | undefined;
+let observer: IntersectionObserver | undefined;
+
+// Server returns a page of PAGE_SIZE; we still drop the excluded id and any
+// anonymous people locally (cheap, at most one missing slot per page).
+function applyLocalFilter(list: Person[]): Person[] {
+  return list
+    .filter((p) => p.id !== props.excludeId)
+    .filter((p) => (props.onlyNamed ? !!p.display_name : true));
 }
 
-const filtered = computed(() => {
-  const q = query.value.trim().toLowerCase();
-  if (!q) return people.value;
-  return people.value.filter((p) => {
-    if (p.display_name?.toLowerCase().includes(q)) return true;
-    if (p.id.toLowerCase().startsWith(q)) return true;
-    return false;
+async function fetchPage(): Promise<Person[]> {
+  const q = query.value.trim();
+  return peopleApi.list({
+    limit: PAGE_SIZE,
+    offset,
+    ...(q ? { q } : {}),
   });
+}
+
+// Reset and load the first page for the current search term.
+async function reload() {
+  const token = ++loadToken;
+  loading.value = true;
+  offset = 0;
+  try {
+    const list = await fetchPage();
+    if (token !== loadToken) return; // stale response, a newer reload won
+    people.value = applyLocalFilter(list);
+    offset = list.length;
+    hasMore.value = list.length === PAGE_SIZE;
+  } finally {
+    if (token === loadToken) loading.value = false;
+  }
+  await nextTick();
+  observeSentinel();
+}
+
+// Append the next page (infinite scroll).
+async function loadMore() {
+  if (loadingMore.value || loading.value || !hasMore.value) return;
+  const token = loadToken;
+  loadingMore.value = true;
+  try {
+    const list = await fetchPage();
+    if (token !== loadToken) return; // a reload happened mid-flight
+    people.value = people.value.concat(applyLocalFilter(list));
+    offset += list.length;
+    hasMore.value = list.length === PAGE_SIZE;
+  } finally {
+    if (token === loadToken) loadingMore.value = false;
+  }
+  // Re-attach: if the sentinel is still on screen (tall viewport, short page)
+  // the observer won't re-fire on its own, so re-observe to keep loading.
+  await nextTick();
+  observeSentinel();
+}
+
+function observeSentinel() {
+  observer?.disconnect();
+  if (!sentinel.value) return;
+  observer = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMore();
+    },
+    { threshold: 0.1 },
+  );
+  observer.observe(sentinel.value);
+}
+
+watch(query, () => {
+  clearTimeout(searchDebounce);
+  searchDebounce = setTimeout(reload, 300);
 });
 
 function pick(p: Person) {
@@ -77,17 +137,21 @@ watch(
     if (v) {
       selected.value = null;
       query.value = "";
-      load();
+      reload();
+    } else {
+      observer?.disconnect();
     }
   },
 );
 
 onMounted(() => {
   window.addEventListener("keydown", onKey);
-  if (props.open) load();
+  if (props.open) reload();
 });
 onUnmounted(() => {
   window.removeEventListener("keydown", onKey);
+  observer?.disconnect();
+  clearTimeout(searchDebounce);
 });
 </script>
 
@@ -109,35 +173,43 @@ onUnmounted(() => {
           />
 
           <p v-if="loading" class="muted">Carregando pessoas…</p>
-          <p v-else-if="!filtered.length" class="muted">
+          <p v-else-if="!people.length" class="muted">
             <template v-if="query">Nenhuma pessoa com esse nome.</template>
             <template v-else>Nenhuma outra pessoa disponível.</template>
           </p>
 
-          <div v-else class="people-grid">
-            <button
-              v-for="p in filtered"
-              :key="p.id"
-              type="button"
-              class="person-card"
-              :class="{ active: selected?.id === p.id }"
-              @click="pick(p)"
-            >
-              <FaceThumb
-                v-if="p.thumb_signed_url && p.thumb_bbox"
-                :src="p.thumb_signed_url"
-                :bbox="p.thumb_bbox"
-                :size="72"
-                :padding="0.3"
-              />
-              <div v-else class="thumb-placeholder">?</div>
-              <strong class="name">{{ p.display_name || "Sem nome" }}</strong>
-              <span class="muted small">
-                {{ p.face_count }} {{ p.face_count === 1 ? "foto" : "fotos" }}
-              </span>
-              <span v-if="selected?.id === p.id" class="check">✓</span>
-            </button>
-          </div>
+          <template v-else>
+            <div class="people-grid">
+              <button
+                v-for="p in people"
+                :key="p.id"
+                type="button"
+                class="person-card"
+                :class="{ active: selected?.id === p.id }"
+                @click="pick(p)"
+              >
+                <FaceThumb
+                  v-if="p.thumb_signed_url && p.thumb_bbox"
+                  :src="p.thumb_signed_url"
+                  :bbox="p.thumb_bbox"
+                  :size="72"
+                  :padding="0.3"
+                />
+                <div v-else class="thumb-placeholder">?</div>
+                <strong class="name">{{ p.display_name || "Sem nome" }}</strong>
+                <span class="muted small">
+                  {{ p.face_count }} {{ p.face_count === 1 ? "foto" : "fotos" }}
+                </span>
+                <span v-if="selected?.id === p.id" class="check">✓</span>
+              </button>
+            </div>
+
+            <!-- Infinite-scroll trigger: when this enters the viewport we
+                 fetch the next page of PAGE_SIZE people. -->
+            <div v-if="hasMore" ref="sentinel" class="load-sentinel">
+              <span v-if="loadingMore" class="muted small">Carregando mais…</span>
+            </div>
+          </template>
         </div>
 
         <footer class="dialog-foot">
@@ -221,6 +293,13 @@ onUnmounted(() => {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
   gap: 0.6rem;
+}
+.load-sentinel {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 40px;
+  padding: 0.6rem 0;
 }
 .person-card {
   display: flex;

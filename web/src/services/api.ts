@@ -271,6 +271,9 @@ export interface PeopleFilters {
   year?: number;
   class?: string;
   status?: "active" | "rejected";
+  q?: string;
+  limit?: number;
+  offset?: number;
 }
 
 export interface AvailableFilters {
@@ -320,6 +323,9 @@ export const peopleApi = {
     if (filters.year !== undefined) params.year = filters.year;
     if (filters.class) params.class = filters.class;
     if (filters.status) params.status = filters.status;
+    if (filters.q) params.q = filters.q;
+    if (filters.limit !== undefined) params.limit = filters.limit;
+    if (filters.offset !== undefined) params.offset = filters.offset;
     return (await api.get<Person[]>("/people", { params })).data;
   },
   get: async (personId: string): Promise<Person> =>
