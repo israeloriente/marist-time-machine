@@ -19,7 +19,7 @@ const mode = ref<Mode>("people");
 const profileStore = useProfileStore();
 const notify = useNotifyStore();
 
-const anonymousPeople = ref<Array<Person & { thumb?: Face | null }>>([]);
+const anonymousPeople = ref<Person[]>([]);
 const orphanFaces = ref<Face[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
@@ -65,41 +65,27 @@ async function load() {
       peopleApi.list(filters),
       facesApi.unassigned(60, 0, 0.5),
     ]);
-    // Only show people without display_name (anonymous clusters).
+    // Only show people without display_name (anonymous clusters). The thumbnail
+    // comes embedded in the /people response (thumb_signed_url + thumb_bbox),
+    // so no per-person /faces requests are needed.
     const anon = allPeople.filter((p) => !p.display_name);
-    // Get one face per anonymous person for the thumbnail.
-    await Promise.all(
-      anon.map(async (p) => {
-        try {
-          const f = await peopleApi.faces(p.id);
-          (p as Person & { thumb?: Face | null }).thumb = f[0] ?? null;
-        } catch {
-          (p as Person & { thumb?: Face | null }).thumb = null;
-        }
-      }),
-    );
     anonymousPeople.value = anon;
     orphanFaces.value = faces;
 
-    // Pull pending counts for both lists (best-effort, parallel).
-    await Promise.all([
-      ...anon.map(async (p) => {
-        try {
-          const r = await suggestionsApi.count({ person_id: p.id });
-          counts.value[p.id] = r.pending;
-        } catch {
-          counts.value[p.id] = 0;
-        }
-      }),
-      ...faces.map(async (f) => {
-        try {
-          const r = await suggestionsApi.count({ face_id: f.id });
-          counts.value[f.id] = r.pending;
-        } catch {
-          counts.value[f.id] = 0;
-        }
-      }),
-    ]);
+    // Pending counts for both lists in a single batch request (was one
+    // /suggestions/count call per person + per face).
+    try {
+      const r = await suggestionsApi.countBatch({
+        person_ids: anon.map((p) => p.id),
+        face_ids: faces.map((f) => f.id),
+      });
+      const next: Record<string, number> = {};
+      for (const p of anon) next[p.id] = r.people[p.id] ?? 0;
+      for (const f of faces) next[f.id] = r.faces[f.id] ?? 0;
+      counts.value = next;
+    } catch {
+      counts.value = {};
+    }
   } catch (e: any) {
     error.value = e.response?.data?.detail ?? e.message ?? String(e);
   } finally {
@@ -228,9 +214,9 @@ onMounted(async () => {
       <div v-else class="grid">
         <div v-for="p in anonymousPeople" :key="p.id" class="card-item">
           <FaceThumb
-            v-if="p.thumb"
-            :src="p.thumb.signed_url"
-            :bbox="p.thumb.bbox"
+            v-if="p.thumb_signed_url && p.thumb_bbox"
+            :src="p.thumb_signed_url"
+            :bbox="p.thumb_bbox"
             :size="100"
             :padding="0.3"
           />

@@ -668,4 +668,16 @@ export const suggestionsApi = {
   },
   count: async (target: { person_id?: string; face_id?: string }): Promise<{ pending: number }> =>
     (await api.get("/suggestions/count", { params: target })).data,
+  // Batch counts: one request for many targets instead of one per id.
+  // Returns maps id -> pending; ids with no pending suggestion are omitted.
+  countBatch: async (targets: {
+    person_ids?: string[];
+    face_ids?: string[];
+  }): Promise<{ people: Record<string, number>; faces: Record<string, number> }> =>
+    (
+      await api.post("/suggestions/count/batch", {
+        person_ids: targets.person_ids ?? [],
+        face_ids: targets.face_ids ?? [],
+      })
+    ).data,
 };

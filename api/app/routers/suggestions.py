@@ -661,3 +661,49 @@ async def count_for_target(
         face_id,
     )
     return {"pending": int(row["n"]) if row else 0}
+
+
+class CountBatchIn(BaseModel):
+    """Targets to fetch pending-suggestion counts for, in two grouped queries."""
+
+    person_ids: list[UUID] = Field(default_factory=list)
+    face_ids: list[UUID] = Field(default_factory=list)
+
+
+@router.post("/count/batch")
+async def count_for_targets(
+    body: CountBatchIn,
+    _user: User = CurrentUser,
+) -> dict:
+    """Pending-suggestion counts for many targets at once.
+
+    Collapses the per-target /count N+1 (the /contribute page used to fire one
+    request per person and per face) into two grouped queries. Returns
+    {"people": {id: n}, "faces": {id: n}} with an entry only for ids that have
+    at least one pending suggestion; callers should default missing ids to 0.
+    """
+    people: dict[str, int] = {}
+    faces: dict[str, int] = {}
+    if body.person_ids:
+        rows = await db.fetch(
+            """
+            select person_id, count(*) as n
+            from public.name_suggestions
+            where status = 'pending' and person_id = any($1::uuid[])
+            group by person_id
+            """,
+            body.person_ids,
+        )
+        people = {str(r["person_id"]): int(r["n"]) for r in rows}
+    if body.face_ids:
+        rows = await db.fetch(
+            """
+            select face_id, count(*) as n
+            from public.name_suggestions
+            where status = 'pending' and face_id = any($1::uuid[])
+            group by face_id
+            """,
+            body.face_ids,
+        )
+        faces = {str(r["face_id"]): int(r["n"]) for r in rows}
+    return {"people": people, "faces": faces}
