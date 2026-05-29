@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import CenteredNotice from "@/components/CenteredNotice.vue";
 import FaceThumb from "@/components/FaceThumb.vue";
 import SuggestNameDialog from "@/components/SuggestNameDialog.vue";
@@ -19,10 +19,18 @@ const mode = ref<Mode>("people");
 const profileStore = useProfileStore();
 const notify = useNotifyStore();
 
+const FACES_PAGE = 60;
+
 const anonymousPeople = ref<Person[]>([]);
 const orphanFaces = ref<Face[]>([]);
 const loading = ref(true);
 const error = ref<string | null>(null);
+
+// Orphan-faces infinite scroll.
+const loadingMoreFaces = ref(false);
+const facesHasMore = ref(false);
+const facesSentinel = ref<HTMLElement | null>(null);
+let facesObserver: IntersectionObserver | undefined;
 
 // Filters
 const year = ref<number | "">("");
@@ -63,7 +71,7 @@ async function load() {
     if (klass.value) filters.class = klass.value;
     const [allPeople, faces] = await Promise.all([
       peopleApi.list(filters),
-      facesApi.unassigned(60, 0, 0.5),
+      facesApi.unassigned(FACES_PAGE, 0, 0.5),
     ]);
     // Only show people without display_name (anonymous clusters). The thumbnail
     // comes embedded in the /people response (thumb_signed_url + thumb_bbox),
@@ -71,6 +79,7 @@ async function load() {
     const anon = allPeople.filter((p) => !p.display_name);
     anonymousPeople.value = anon;
     orphanFaces.value = faces;
+    facesHasMore.value = faces.length === FACES_PAGE;
 
     // Pending counts for both lists in a single batch request (was one
     // /suggestions/count call per person + per face).
@@ -91,6 +100,50 @@ async function load() {
   } finally {
     loading.value = false;
   }
+  await nextTick();
+  observeFacesSentinel();
+}
+
+// Append the next page of orphan faces (infinite scroll). Only the new ids'
+// pending counts are fetched, in a single batch request.
+async function loadMoreFaces() {
+  if (loadingMoreFaces.value || loading.value || !facesHasMore.value) return;
+  loadingMoreFaces.value = true;
+  try {
+    const more = await facesApi.unassigned(FACES_PAGE, orphanFaces.value.length, 0.5);
+    // Drop any ids already shown (defensive against shifting pagination).
+    const seen = new Set(orphanFaces.value.map((f) => f.id));
+    const fresh = more.filter((f) => !seen.has(f.id));
+    orphanFaces.value = orphanFaces.value.concat(fresh);
+    facesHasMore.value = more.length === FACES_PAGE;
+    if (fresh.length) {
+      try {
+        const r = await suggestionsApi.countBatch({ face_ids: fresh.map((f) => f.id) });
+        const next = { ...counts.value };
+        for (const f of fresh) next[f.id] = r.faces[f.id] ?? 0;
+        counts.value = next;
+      } catch {
+        /* counts are best-effort */
+      }
+    }
+  } finally {
+    loadingMoreFaces.value = false;
+  }
+  // Re-observe in case the sentinel is still on screen (tall viewport).
+  await nextTick();
+  observeFacesSentinel();
+}
+
+function observeFacesSentinel() {
+  facesObserver?.disconnect();
+  if (!facesSentinel.value) return;
+  facesObserver = new IntersectionObserver(
+    (entries) => {
+      if (entries.some((e) => e.isIntersecting)) loadMoreFaces();
+    },
+    { threshold: 0.1 },
+  );
+  facesObserver.observe(facesSentinel.value);
 }
 
 // Dialog state — single dialog reused for person or face targets.
@@ -168,7 +221,20 @@ onMounted(async () => {
   // Attach the watcher AFTER seeding so we don't trigger an extra load.
   watch([year, klass], load);
 
+  // The faces sentinel only exists while the "Rostos avulsos" tab is open, so
+  // (re)attach the observer whenever we switch into it.
+  watch(mode, async (m) => {
+    if (m === "faces") {
+      await nextTick();
+      observeFacesSentinel();
+    }
+  });
+
   await Promise.all([loadFilters(), load()]);
+});
+
+onUnmounted(() => {
+  facesObserver?.disconnect();
 });
 </script>
 
@@ -247,6 +313,10 @@ onMounted(async () => {
           </button>
         </div>
       </div>
+      <!-- Infinite-scroll trigger for orphan faces. -->
+      <div v-if="facesCount && facesHasMore" ref="facesSentinel" class="load-sentinel">
+        <span v-if="loadingMoreFaces" class="muted small">Carregando mais…</span>
+      </div>
     </div>
 
     <SuggestNameDialog
@@ -259,6 +329,13 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.load-sentinel {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 40px;
+  padding: 0.8rem 0;
+}
 .contrib-filters {
   display: grid;
   grid-template-columns: 1fr 1fr auto;
