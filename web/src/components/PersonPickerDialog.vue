@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import FaceThumb from "@/components/FaceThumb.vue";
-import { peopleApi, type Face, type Person } from "@/services/api";
+import { peopleApi, type Person } from "@/services/api";
 
 const props = withDefaults(
   defineProps<{
@@ -24,7 +24,7 @@ const emit = defineEmits<{
   (e: "pick", person: Person): void;
 }>();
 
-const people = ref<Array<Person & { thumb?: Face | null }>>([]);
+const people = ref<Person[]>([]);
 const loading = ref(false);
 const query = ref("");
 const selected = ref<Person | null>(null);
@@ -32,21 +32,12 @@ const selected = ref<Person | null>(null);
 async function load() {
   loading.value = true;
   try {
+    // Thumbnails come embedded in the /people response (thumb_signed_url +
+    // thumb_bbox), so no per-person /faces requests are needed here.
     const list = await peopleApi.list();
     people.value = list
       .filter((p) => p.id !== props.excludeId)
       .filter((p) => (props.onlyNamed ? !!p.display_name : true));
-    // load one thumb per person, in parallel
-    await Promise.all(
-      people.value.map(async (p) => {
-        try {
-          const fs = await peopleApi.faces(p.id);
-          (p as Person & { thumb?: Face | null }).thumb = fs[0] ?? null;
-        } catch {
-          (p as Person & { thumb?: Face | null }).thumb = null;
-        }
-      }),
-    );
   } finally {
     loading.value = false;
   }
@@ -133,9 +124,9 @@ onUnmounted(() => {
               @click="pick(p)"
             >
               <FaceThumb
-                v-if="p.thumb"
-                :src="p.thumb.signed_url"
-                :bbox="p.thumb.bbox"
+                v-if="p.thumb_signed_url && p.thumb_bbox"
+                :src="p.thumb_signed_url"
+                :bbox="p.thumb_bbox"
                 :size="72"
                 :padding="0.3"
               />
