@@ -81,7 +81,7 @@ export function buildLights() {
   key.shadow.mapSize.set(2048, 2048);
   key.shadow.camera.near = 0.5;
   key.shadow.camera.far = 16;
-  const s = 3.4;
+  const s = 2.0;
   key.shadow.camera.left = -s;
   key.shadow.camera.right = s;
   key.shadow.camera.top = s * 0.6;

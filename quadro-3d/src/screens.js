@@ -15,9 +15,10 @@ import { CSS3DObject } from "three/examples/jsm/renderers/CSS3DRenderer.js";
 import { box, hollowFrame, plane, UNIT_PLANE } from "./geo.js";
 import { PALETTE } from "./config.js";
 
-// Pixels de DOM por metro de mundo. Mais alto = página mais nítida e mais cara
-// de compor. 420 dá ~1700 px de largura num display de 4 m.
-const PX_PER_METER = 420;
+// Pixels de DOM por metro de mundo. Em 1000, o display de 1.92 x 1.08 m vira
+// um elemento de exatamente 1920x1080 px: a aplicação diagrama na resolução
+// nativa do painel e o transform 3D só reduz na hora de compor.
+const PX_PER_METER = 1000;
 
 // ---------------------------------------------------------------------------
 // Hardware do display
@@ -97,8 +98,11 @@ export function createLiveScreen({ w, h, x = 0, y = 0, z, url, fallbackUrl }) {
   if (WEBVIEW_OK) {
     frame = document.createElement("webview");
     frame.setAttribute("src", url);
-    // Sem popups e sem preload: o guest é conteúdo externo, tratado como tal.
-    frame.setAttribute("allowpopups", "false");
+    // NÃO setar `allowpopups`: é atributo booleano de HTML, então a simples
+    // presença vale true mesmo com valor "false". Ausência é o jeito de
+    // desligar. O processo principal ainda força params.allowpopups = false
+    // em 'will-attach-webview', mas o atributo sozinho já dispara o aviso de
+    // segurança do Electron.
     frame.addEventListener("did-fail-load", (e) => {
       // -3 é ABORTED (navegação cancelada); não vale trocar pela reserva.
       if (e.errorCode !== -3) toFallback();
@@ -144,12 +148,20 @@ export function createLiveScreen({ w, h, x = 0, y = 0, z, url, fallbackUrl }) {
     else frame.setAttribute("src", url);
   }
 
+  // Suspender = tirar o host do fluxo de layout. O guest do webview para de
+  // ser composto e o Chromium estrangula os timers dele. Não mexer no
+  // `display` do <webview> em si — só no host — porque ele depende do próprio
+  // display:flex pra dimensionar o <object> interno.
+  function setActive(on) {
+    host.style.display = on ? "" : "none";
+  }
+
   function setUrl(next) {
     usedFallback = false;
     frame.setAttribute("src", next);
   }
 
-  return { kind: "live", object, host, frame, punch, reload, setUrl, engine: WEBVIEW_OK ? "webview" : "iframe" };
+  return { kind: "live", object, host, frame, punch, reload, setUrl, setActive, engine: WEBVIEW_OK ? "webview" : "iframe" };
 }
 
 export function screenMaterials() {

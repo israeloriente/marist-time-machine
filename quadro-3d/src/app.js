@@ -2,15 +2,15 @@
 // app.js — bootstrap: renderer, cena, câmeras, HUD e loop.
 //
 // Dois renderers empilhados: o WebGL (canvas) e o CSS3DRenderer (DOM). O
-// segundo existe só pra versão de display único, onde a aplicação web roda de
-// verdade dentro da tela. A ordem entre eles depende do modo — ver setTouch().
+// segundo é o que faz a aplicação web rodar de verdade dentro do display. A
+// ordem entre eles depende do modo — ver setTouch().
 // ---------------------------------------------------------------------------
 
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { CSS3DRenderer } from "three/examples/jsm/renderers/CSS3DRenderer.js";
-import { BOARD, SCREEN } from "./config.js";
-import { buildAcrylic, buildBoard } from "./board.js";
+import { DISPLAY, ROOM, SCREEN } from "./config.js";
+import { buildBoard, buildGlass } from "./board.js";
 import { buildLights, buildRoom } from "./scene-env.js";
 import * as T from "./textures.js";
 
@@ -36,7 +36,13 @@ cssLayer.appendChild(cssRenderer.domElement);
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x14161a);
+
+// A camada CSS3D tem a própria cena. `cssRoot` espelha o deslocamento vertical
+// do quadro, senão a página viva descola do buraco do punch-through quando os
+// modos têm alturas diferentes.
 const cssScene = new THREE.Scene();
+const cssRoot = new THREE.Group();
+cssScene.add(cssRoot);
 
 // ---------------------------------------------------------------------------
 // Ambiente (reflexos): equirect procedural -> PMREM. Sem HDR externo, o app
@@ -61,27 +67,34 @@ scene.add(room, lights.group);
 // ---------------------------------------------------------------------------
 const screenUrl = window.quadro?.screenUrl || SCREEN.defaultUrl;
 const built = new Map();
-let mode = "original";
+let mode = "crown";
 let current = null;
 
 function getMode(name) {
   if (built.has(name)) return built.get(name);
 
-  const { board, screens } = buildBoard({
+  const { board, layout: L, screens } = buildBoard({
     mode: name,
     envMap,
     screenUrl,
     fallbackUrl: SCREEN.fallback,
   });
-  const acrylic = buildAcrylic(envMap, { mode: name });
-  board.add(acrylic);
+  const glass = buildGlass(envMap, L);
+  board.add(glass);
+
+  // Os dois modos têm alturas diferentes. Deslocamos cada um pra que a BASE do
+  // quadro caia sempre na mesma altura da parede — assim a composição com o
+  // rodapé de pedra não pula ao trocar de modo.
+  const offsetY = ROOM.boardBottom + L.boardH / 2;
+  board.position.y = offsetY;
 
   const entry = {
     board,
-    acrylic,
-    screens,
-    sheet: acrylic.getObjectByName("chapa"),
-    glare: acrylic.getObjectByName("reflexos"),
+    layout: L,
+    offsetY,
+    glass,
+    sheet: glass.getObjectByName("chapa"),
+    glare: glass.getObjectByName("reflexos"),
     live: screens.filter((s) => s.kind === "live"),
   };
   built.set(name, entry);
@@ -91,67 +104,82 @@ function getMode(name) {
 function setMode(name) {
   if (current) {
     scene.remove(current.board);
-    for (const s of current.live) cssScene.remove(s.object);
+    // Suspender a tela que sai importa: os dois modos têm webview, e sem isso
+    // ficariam duas instâncias da aplicação rodando ao mesmo tempo.
+    for (const s of current.live) {
+      cssRoot.remove(s.object);
+      s.setActive(false);
+    }
   }
   mode = name;
   current = getMode(name);
   scene.add(current.board);
-  for (const s of current.live) cssScene.add(s.object);
-
-  // Só faz sentido oferecer o modo toque onde existe uma tela viva.
-  const hasLive = current.live.length > 0;
-  btnToque.disabled = !hasLive;
-  btnToque.title = hasLive ? "" : "Só disponível na versão de display único";
-  if (!hasLive && touching) setTouch(false);
+  cssRoot.position.y = current.offsetY;
+  for (const s of current.live) {
+    cssRoot.add(s.object);
+    s.setActive(true);
+  }
 
   applyToggles();
   for (const b of document.querySelectorAll(".hud-modes button")) {
     b.classList.toggle("on", b.dataset.mode === name);
   }
-  goTo(defaultView(name), 700);
+  goTo("frontal", 700);
   updateFoot();
 }
 
-const defaultView = (m) => (m === "single" ? "frontal" : "tresquartos");
-
 // ---------------------------------------------------------------------------
 // Câmera
+//
+// As posições abaixo são em coordenadas LOCAIS do quadro; o deslocamento
+// vertical do modo é somado na hora de aplicar.
 // ---------------------------------------------------------------------------
 const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.05, 60);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
-controls.minDistance = 0.55;
-controls.maxDistance = 9;
+controls.minDistance = 0.4;
+controls.maxDistance = 7;
 controls.maxPolarAngle = Math.PI * 0.92;
 
-// Distâncias calculadas pro quadro caber inteiro em 16:9 com o FOV de 38°:
-// meia-largura 2.1 m / tan(hfov/2) ~= 3.9 m, mais margem.
-const VIEWS = {
-  frontal: { pos: [0, 0.0, 4.45], target: [0, 0, 0] },
-  tresquartos: { pos: [2.9, 0.95, 3.75], target: [0, -0.04, 0] },
-  fachada: { pos: [0.08, 0.1, 1.62], target: [0, 0.06, 0.05] },
-  turmas: { pos: [-1.05, 0.0, 1.28], target: [-1.08, -0.02, 0.03] },
-  rasante: { pos: [-3.1, -0.55, 1.95], target: [0.5, -0.05, 0] },
-};
+// Distância que enquadra o quadro inteiro com uma folga de 22 cm, dado o FOV
+// vertical de 38°. Como os dois gabinetes têm alturas diferentes, as vistas
+// gerais são derivadas dela em vez de fixas.
+const HALF_FOV = THREE.MathUtils.degToRad(19);
+const fitDistance = (L) => (L.boardH / 2 + 0.22) / Math.tan(HALF_FOV);
+
+function views(L) {
+  const d = fitDistance(L);
+  return {
+    frontal: { pos: [0, 0, d], target: [0, 0, 0] },
+    tresquartos: { pos: [d * 0.63, d * 0.2, d * 0.82], target: [0, -0.02, 0] },
+    rasante: { pos: [-d * 0.67, -d * 0.13, d * 0.41], target: [0.3, -0.05, 0] },
+    // Detalhes: distância absoluta, porque o coroamento e a tela têm o mesmo
+    // tamanho nos dois modos.
+    frontao: { pos: [0, 0.5, 1.15], target: [0, 0.5, 0.04] },
+    tela: { pos: [0, -0.22, 1.5], target: [0, -0.22, 0.03] },
+  };
+}
 
 let tween = null;
 function goTo(name, ms = 950) {
-  const v = VIEWS[name];
+  if (!current) return;
+  const v = views(current.layout)[name];
   if (!v) return;
+  const dy = current.offsetY;
   tween = {
     t: 0, ms,
-    fromPos: camera.position.clone(), toPos: new THREE.Vector3(...v.pos),
-    fromTarget: controls.target.clone(), toTarget: new THREE.Vector3(...v.target),
+    fromPos: camera.position.clone(),
+    toPos: new THREE.Vector3(v.pos[0], v.pos[1] + dy, v.pos[2]),
+    fromTarget: controls.target.clone(),
+    toTarget: new THREE.Vector3(v.target[0], v.target[1] + dy, v.target[2]),
   };
   for (const b of document.querySelectorAll(".hud-views button")) {
     b.classList.toggle("on", b.dataset.view === name);
   }
 }
 
-camera.position.set(...VIEWS.tresquartos.pos);
-controls.target.set(...VIEWS.tresquartos.target);
 controls.update();
 
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -163,7 +191,7 @@ const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) 
 // ao mesmo tempo em que o canvas os recebe. Então há duas composições:
 //
 //   orbitar  — CSS3D ATRÁS do canvas. O plano punch-through abre o buraco, o
-//              acrílico e a moldura compõem por cima, e a órbita funciona.
+//              vidro e a moldura compõem por cima, e a órbita funciona.
 //   tocar    — CSS3D NA FRENTE, com eventos ligados e a órbita travada. A
 //              página fica clicável de verdade, ao custo de ficar por cima de
 //              tudo (o que só se nota fora do enquadramento frontal).
@@ -197,19 +225,19 @@ document.getElementById("btn-reload").addEventListener("click", () => {
 });
 
 let autoRotate = false;
-const cbAcrilico = document.getElementById("t-acrilico");
+const cbVidro = document.getElementById("t-acrilico");
 const cbReflexo = document.getElementById("t-reflexo");
 const cbSala = document.getElementById("t-sala");
 const cbGirar = document.getElementById("t-girar");
 
 function applyToggles() {
   if (!current) return;
-  current.sheet.visible = cbAcrilico.checked;
+  current.sheet.visible = cbVidro.checked;
   current.glare.visible = cbReflexo.checked;
   room.visible = cbSala.checked;
   autoRotate = cbGirar.checked;
 }
-for (const el of [cbAcrilico, cbReflexo, cbSala, cbGirar]) {
+for (const el of [cbVidro, cbReflexo, cbSala, cbGirar]) {
   el.addEventListener("change", applyToggles);
 }
 
@@ -230,13 +258,13 @@ window.addEventListener("keydown", (e) => {
     if (e.key === "Escape") setTouch(false);
     return;
   }
-  const views = { 1: "frontal", 2: "tresquartos", 3: "fachada", 4: "turmas", 5: "rasante" };
+  const views = { 1: "frontal", 2: "tresquartos", 3: "frontao", 4: "tela", 5: "rasante" };
   if (views[e.key]) return goTo(views[e.key]);
   switch (e.key.toLowerCase()) {
-    case "q": return setMode("original");
+    case "q": return setMode("crown");
     case "w": return setMode("single");
     case "t": return setTouch(true);
-    case "a": return toggle(cbAcrilico);
+    case "a": return toggle(cbVidro);
     case "r": return toggle(cbReflexo);
     case "p": return toggle(cbSala);
     case "g": return toggle(cbGirar);
@@ -247,9 +275,11 @@ const meta = document.getElementById("foot-meta");
 function updateFoot() {
   const v = window.quadro?.versions;
   const live = current?.live[0];
+  const L = current?.layout;
   meta.textContent = [
-    `${BOARD.width.toFixed(2)} × ${BOARD.height.toFixed(2)} m`,
-    live ? `display: ${live.engine} · ${screenUrl}` : `three r${THREE.REVISION}`,
+    `display ${DISPLAY.width * 1000}×${DISPLAY.height * 1000} (16:9)`,
+    L ? `quadro ${L.boardW.toFixed(2)}×${L.boardH.toFixed(2)} m` : null,
+    live ? `${live.engine} · ${screenUrl}` : `three r${THREE.REVISION}`,
     v ? `electron ${v.electron}` : null,
   ].filter(Boolean).join(" · ");
 }
@@ -290,10 +320,25 @@ renderer.setAnimationLoop(() => {
   if (current?.live.length) cssRenderer.render(cssScene, camera);
 });
 
-setMode("original");
+// O primeiro setMode precisa esperar o DOM ficar pronto.
+//
+// O custom element <webview> do Electron só é registrado DEPOIS do parse dos
+// scripts da página: medido, `document.createElement('webview')` durante o
+// parse não tem `loadURL`, e no DOMContentLoaded já tem. Como o modo padrão
+// monta uma tela viva na hora, detectar cedo demais faz createLiveScreen cair
+// no <iframe> — que esbarra em X-Frame-Options e derruba justamente o caso de
+// uso principal.
+function start() {
+  setMode("crown");
+  // Só some com o loader depois do primeiro frame realmente pintado — as
+  // texturas procedurais levam alguns ms pra gerar.
+  requestAnimationFrame(() =>
+    requestAnimationFrame(() => document.getElementById("loader").classList.add("hide")),
+  );
+}
 
-// Só some com o loader depois do primeiro frame realmente pintado — as
-// texturas procedurais levam alguns ms pra gerar.
-requestAnimationFrame(() =>
-  requestAnimationFrame(() => document.getElementById("loader").classList.add("hide")),
-);
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", start, { once: true });
+} else {
+  start();
+}

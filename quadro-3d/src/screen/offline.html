@@ -2,102 +2,544 @@
 <html lang="pt-BR">
   <head>
     <meta charset="utf-8" />
-    <title>Cápsula Marista — offline</title>
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:"
+    />
+    <title>Cápsula Marista — descanso de tela</title>
     <style>
-      :root { --accent: #d8c48a; }
-      * { box-sizing: border-box; margin: 0; }
-      html, body { height: 100%; }
-      body {
-        display: grid;
-        place-items: center;
-        background: radial-gradient(120% 90% at 50% 0%, #1d232e 0%, #0e1116 60%, #090b0e 100%);
-        color: #f2eee6;
-        font-family: "Inter", "Segoe UI", -apple-system, sans-serif;
-        text-align: center;
-        overflow: hidden;
+      /* ===================================================================
+         Descanso de tela: a fachada do Colégio Marista Pio X.
+         As janelas abrem em batente e revelam fotos do acervo atrás delas.
+
+         Elevação frontal, não a perspectiva da foto de referência: a moldura
+         3D em volta já dá o ângulo, e um prédio em perspectiva dentro de um
+         quadro em perspectiva briga com ele.
+
+         Alinhamento dos andares: `.wing` e `.bay-body` têm a MESMA altura,
+         o mesmo padding e o mesmo gap, e os andares são `flex: 1`. É isso que
+         faz as fileiras das alas baterem com as do corpo central. O corpo é
+         mais alto só por causa do frontão, que fica acima da linha do telhado.
+         =================================================================== */
+      :root {
+        --wall: #f1eee6;
+        --wall-lit: #fbf9f4;
+        --wall-shade: #e0dbcf;
+        --wall-deep: #cec9bb;
+        --trim: #2f6389;
+        --trim-dark: #1f4363;
+        --glass: #74b0cd;
+        --glass-dark: #4589ae;
+        --ink: #23486b;
+        --accent: #d8c48a;
+
+        --floor-h: 56vh; /* altura útil dos 3 andares, igual nas alas e no corpo */
       }
-      .wrap { padding: 4vh 6vw; max-width: 1100px; }
-      .kicker {
-        font-size: clamp(10px, 1.1vw, 15px);
-        letter-spacing: 0.42em;
-        text-transform: uppercase;
-        color: var(--accent);
-        opacity: 0.85;
+
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+      html, body { height: 100%; overflow: hidden; }
+      body {
+        background: #0e1116;
+        font-family: "Inter", "Segoe UI", -apple-system, sans-serif;
+        color: #f2eee6;
+      }
+
+      /* ---------------- céu ---------------- */
+      .sky {
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(#2b7db9 0%, #63a8d4 42%, #a6d0e7 100%);
+      }
+      .cloud {
+        position: absolute;
+        border-radius: 50%;
+        background: radial-gradient(closest-side, rgba(255,255,255,0.9), rgba(255,255,255,0));
+        animation: drift linear infinite;
+      }
+      @keyframes drift {
+        from { transform: translateX(-35vw); }
+        to   { transform: translateX(135vw); }
+      }
+
+      /* ---------------- prédio ---------------- */
+      .building {
+        position: absolute;
+        left: 50%;
+        bottom: 16vh;
+        transform: translateX(-50%);
+        width: 96vw;
+        display: flex;
+        align-items: flex-end;
+        filter: drop-shadow(0 2vh 4vh rgba(8, 22, 38, 0.4));
+      }
+
+      .wing {
+        flex: 1 1 0;
+        height: var(--floor-h);
+        background: linear-gradient(100deg, var(--wall-shade), var(--wall) 26%, var(--wall-lit) 55%, var(--wall) 80%, var(--wall-shade));
+        border-top: 0.9vh solid var(--wall-lit);
+        box-shadow: inset 0 1.2vh 0 -0.4vh var(--wall-deep);
+        padding: 2.6vh 1vw 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2.2vh;
+      }
+
+      .floor {
+        flex: 1;
+        display: flex;
+        justify-content: space-evenly;
+        align-items: center;
+        gap: 0.6vw;
+      }
+
+      /* ---------------- corpo central ---------------- */
+      .bay {
+        flex: 0 0 26%;
+        position: relative;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        z-index: 2;
+        filter: drop-shadow(-0.6vw 0 1.2vw rgba(30, 50, 70, 0.18));
+      }
+
+      .cross {
+        width: 0.5vh; height: 4vh;
+        background: var(--wall-lit);
+        position: relative;
+        margin-bottom: -0.3vh;
+      }
+      .cross::after {
+        content: "";
+        position: absolute;
+        left: 50%; top: 24%;
+        transform: translateX(-50%);
+        width: 2vh; height: 0.5vh;
+        background: var(--wall-lit);
+      }
+
+      .pediment {
+        width: 100%;
+        height: 9.5vh;
+        background: linear-gradient(#fdfcf8, var(--wall-shade));
+        clip-path: polygon(50% 0, 100% 100%, 0 100%);
+      }
+      .entablature {
+        width: 100%; height: 1.8vh;
+        background: linear-gradient(var(--wall-lit), var(--wall-deep));
+      }
+      .name {
+        width: 100%;
+        text-align: center;
+        padding: 1.8vh 0 1.6vh;
+        background: linear-gradient(var(--wall-lit), var(--wall));
+        font-family: Georgia, "Times New Roman", serif;
+        color: var(--ink);
+        letter-spacing: 0.24em;
+        line-height: 1.1;
+        text-shadow: 0 0.14vh 0 rgba(255,255,255,0.95);
+      }
+      .name .l1 { display: block; font-size: 2.2vh; }
+      .name .l2 { display: block; font-size: 3.2vh; font-weight: 700; }
+
+      /* Mesma altura/padding/gap da ala — é o que alinha as fileiras. */
+      .bay-body {
+        width: 100%;
+        height: var(--floor-h);
+        background: linear-gradient(100deg, var(--wall-shade), var(--wall-lit) 45%, var(--wall));
+        padding: 2.6vh 1.6vw 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2.2vh;
+      }
+
+      /* Térreo do corpo: a entrada no lugar das janelas. */
+      .entrance {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        align-items: center;
+      }
+      .canopy {
+        width: 108%;
+        height: 2.2vh;
+        background: linear-gradient(var(--trim), var(--trim-dark));
+        border-radius: 0.3vh 0.3vh 0 0;
+        box-shadow: 0 0.5vh 1.2vh rgba(0,0,0,0.28);
+      }
+      .door {
+        width: 52%;
+        flex: 1;
+        margin-top: 0.4vh;
+        background:
+          repeating-linear-gradient(90deg, rgba(255,255,255,0.55) 0 0.22vh, transparent 0.22vh 1.5vh),
+          linear-gradient(var(--glass-dark), var(--trim-dark));
+        border: 0.45vh solid var(--wall-lit);
+        border-bottom: none;
+        border-radius: 3.5vh 3.5vh 0 0;
+      }
+
+      /* ---------------- base ---------------- */
+      .base {
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 16vh;
+        background: linear-gradient(var(--trim), var(--trim-dark));
+        box-shadow: inset 0 0.4vh 0 rgba(255,255,255,0.18);
+      }
+
+      /* ---------------- janela ---------------- */
+      .win {
+        position: relative;
+        flex: 1 1 0;
+        max-width: 2.9vw;
+        aspect-ratio: 1 / 2.3;
+        perspective: 26vh;
+      }
+
+      /* A foto vive ATRÁS das folhas; só aparece quando elas abrem. */
+      .win-photo {
+        position: absolute;
+        inset: 5%;
+        overflow: hidden;
+        background: #171b21;
+      }
+      .win-photo i {
+        position: absolute;
+        inset: 0;
+        background-size: cover;
+        background-position: center;
+        animation: kenburns 28s ease-in-out infinite alternate;
+      }
+      @keyframes kenburns {
+        from { transform: scale(1.1) translate(1%, -2%); }
+        to   { transform: scale(1.24) translate(-1%, 2%); }
+      }
+      /* Véu leve: a foto tem que ler como interior iluminado, não como pôster
+         colado — mas sem escurecer a ponto de virar mancha. */
+      .win-photo::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(180deg, rgba(10,14,20,0.42), rgba(10,14,20,0.05) 40%, rgba(10,14,20,0.38));
+        pointer-events: none;
+      }
+
+      .shutter {
+        position: absolute;
+        top: 5%;
+        width: 47%;
+        height: 90%;
+        background:
+          repeating-linear-gradient(180deg, rgba(255,255,255,0.55) 0 0.2vh, transparent 0.2vh 2.4vh),
+          linear-gradient(155deg, #9ccae2 0%, var(--glass) 48%, var(--glass-dark) 100%);
+        border: 0.18vh solid rgba(255,255,255,0.9);
+        box-shadow: inset 0 0 0.8vh rgba(255,255,255,0.4);
+        transition: transform 1.5s cubic-bezier(0.32, 0.72, 0.22, 1), filter 1.5s ease;
+        /* SEM backface-visibility:hidden — a folha precisa continuar visível de
+           lado quando abre, senão ela some e o efeito vira um simples fade. */
+      }
+      .shutter.l { left: 5%; transform-origin: left center; }
+      .shutter.r { right: 5%; transform-origin: right center; }
+      /* 58°, não 108°: passando de 90° a folha fica de costas e some; e mesmo
+         a 68° ela projeta só 37% da largura, o que some numa janela de ~40 px.
+         A 58° sobram 53% — o suficiente pra ler como batente aberto. */
+      .win.open .shutter.l { transform: rotateY(-58deg); filter: brightness(0.66) saturate(0.8); }
+      .win.open .shutter.r { transform: rotateY(58deg); filter: brightness(0.88); }
+
+      /* Caixilho branco por cima de tudo, com peitoril. */
+      .win-frame {
+        position: absolute;
+        inset: 0;
+        border: 0.4vh solid var(--wall-lit);
+        box-shadow:
+          inset 0 0 0 0.14vh var(--wall-deep),
+          0 0.25vh 0.5vh rgba(0,0,0,0.16);
+        pointer-events: none;
+      }
+      .win-frame::after {
+        content: "";
+        position: absolute;
+        left: -12%; right: -12%;
+        bottom: -0.7vh;
+        height: 0.7vh;
+        background: linear-gradient(var(--wall-lit), var(--wall-deep));
+      }
+
+      /* ---------------- texto ---------------- */
+      .scrim {
+        position: absolute;
+        left: 0; right: 0; bottom: 0;
+        height: 26%;
+        background: linear-gradient(rgba(9,12,17,0) 0%, rgba(9,12,17,0.4) 42%, rgba(9,12,17,0.86) 100%);
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: flex-end;
+        padding-bottom: 2.6vh;
+        text-align: center;
+        pointer-events: none;
       }
       h1 {
-        margin: 2.2vh 0 0;
-        font-size: clamp(26px, 4.6vw, 74px);
+        font-size: 4.1vh;
         font-weight: 300;
-        line-height: 1.08;
+        line-height: 1.06;
         letter-spacing: -0.01em;
+        text-shadow: 0 0.4vh 2vh rgba(0,0,0,0.75);
       }
-      h1 b { font-weight: 700; color: var(--accent); display: block; }
-      p.lead {
-        margin: 2.4vh auto 0;
-        max-width: 30ch;
-        font-size: clamp(12px, 1.35vw, 20px);
-        line-height: 1.55;
-        color: rgba(242, 238, 230, 0.62);
-      }
+      h1 b { display: block; font-weight: 700; color: var(--accent); }
       .cta {
-        margin-top: 4.2vh;
+        margin-top: 1.8vh;
         display: inline-flex;
         align-items: center;
-        gap: 14px;
-        padding: 1.5vh 3.2vw;
-        border: 1px solid rgba(216, 196, 138, 0.45);
+        gap: 1.2vh;
+        padding: 1.3vh 3.2vh;
+        border: 0.2vh solid rgba(216,196,138,0.45);
         border-radius: 999px;
-        font-size: clamp(11px, 1.2vw, 17px);
-        letter-spacing: 0.16em;
+        font-size: 1.6vh;
+        letter-spacing: 0.18em;
         text-transform: uppercase;
         color: var(--accent);
+        background: rgba(9,12,17,0.4);
         animation: breathe 2.6s ease-in-out infinite;
       }
       .dot {
-        width: 9px; height: 9px; border-radius: 50%;
+        width: 1vh; height: 1vh; border-radius: 50%;
         background: var(--accent);
         animation: blink 2.6s ease-in-out infinite;
       }
       @keyframes breathe {
-        0%, 100% { transform: scale(1); border-color: rgba(216,196,138,0.32); }
-        50% { transform: scale(1.035); border-color: rgba(216,196,138,0.8); }
+        0%, 100% { transform: scale(1); border-color: rgba(216,196,138,0.3); }
+        50% { transform: scale(1.03); border-color: rgba(216,196,138,0.85); }
       }
       @keyframes blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
-      .years {
-        margin-top: 5vh;
-        display: flex; flex-wrap: wrap; gap: 0.7vw;
-        justify-content: center;
-      }
-      .years span {
-        padding: 0.9vh 1.5vw;
-        border-radius: 8px;
-        background: rgba(242, 238, 230, 0.06);
-        border: 1px solid rgba(242, 238, 230, 0.08);
-        font-size: clamp(10px, 1vw, 15px);
-        color: rgba(242, 238, 230, 0.5);
-        font-variant-numeric: tabular-nums;
-      }
-      .years span.on { background: var(--accent); color: #14161a; border-color: var(--accent); font-weight: 600; }
+
       footer {
-        position: fixed; bottom: 2.6vh; left: 0; right: 0;
-        font-size: clamp(9px, 0.85vw, 12px);
-        letter-spacing: 0.14em;
+        position: absolute;
+        bottom: 1.1vh; left: 0; right: 0;
+        text-align: center;
+        font-size: 1vh;
+        letter-spacing: 0.16em;
         text-transform: uppercase;
-        color: rgba(242, 238, 230, 0.26);
+        color: rgba(242,238,230,0.22);
       }
     </style>
   </head>
   <body>
-    <div class="wrap">
-      <div class="kicker">Acervo Marista Pio X</div>
-      <h1>Um pedaço de você<b>ainda está aqui.</b></h1>
-      <p class="lead">Escolha o seu ano de formatura e deixe a cápsula procurar você nas fotos do colégio.</p>
-      <div class="cta"><span class="dot"></span> Toque para começar</div>
-      <div class="years">
-        <span>1999</span><span>2000</span><span>2001</span><span>2002</span>
-        <span class="on">2003</span><span>2004</span><span>2005</span><span>2006</span>
+    <div class="sky" id="sky"></div>
+
+    <div class="building">
+      <div class="wing" id="wing-l"></div>
+
+      <div class="bay">
+        <div class="cross"></div>
+        <div class="pediment"></div>
+        <div class="entablature"></div>
+        <div class="name">
+          <span class="l1">COLEGIO</span>
+          <span class="l2">PIO X</span>
+        </div>
+        <div class="bay-body" id="bay-body">
+          <div class="entrance">
+            <div class="canopy"></div>
+            <div class="door"></div>
+          </div>
+        </div>
       </div>
+
+      <div class="wing" id="wing-r"></div>
     </div>
+
+    <div class="base"></div>
+
+    <div class="scrim">
+      <h1>Um pedaço de você<b>ainda está aqui.</b></h1>
+      <div class="cta"><span class="dot"></span> Toque para começar</div>
+    </div>
+
     <footer>modo local · sem conexão com o servidor do acervo</footer>
+
+    <script>
+      // =================================================================
+      // Fotos do acervo, geradas em canvas.
+      //
+      // Esta página é a RESERVA offline — não há rede pra buscar o acervo de
+      // verdade. As fotos são sintetizadas com o mesmo envelhecimento do
+      // quadro impresso: luminância re-tingida com o desvio de cor do lote,
+      // contraste achatado e lavagem em direção ao branco do papel.
+      //
+      // Poucas figuras e grandes: a janela é estreita, e um grupo de doze
+      // pessoas viraria uma mancha marrom nessa largura.
+      // =================================================================
+      const rng = (seed) => {
+        let s = seed >>> 0 || 1;
+        return () => ((s = (Math.imul(s, 1664525) + 1013904223) >>> 0) / 4294967296);
+      };
+
+      const CASTS = [
+        [0.48, 0.85, 0.9],  // ciano
+        [0.82, 0.6, 0.79],  // magenta
+        [0.87, 0.75, 0.56], // sépia
+      ];
+
+      function person(ctx, x, y, r, rand) {
+        const skin = ["#cbaa8c", "#bb9273", "#916e53", "#dcbb99"][(rand() * 4) | 0];
+        const hair = ["#2c2318", "#3f3226", "#161311", "#54402c"][(rand() * 4) | 0];
+        ctx.fillStyle = rand() < 0.7 ? "#eae7df" : "#3b4252";
+        ctx.beginPath();
+        ctx.moveTo(x - r * 1.95, y + r * 3.6);
+        ctx.quadraticCurveTo(x - r * 1.72, y + r, x, y + r * 0.8);
+        ctx.quadraticCurveTo(x + r * 1.72, y + r, x + r * 1.95, y + r * 3.6);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = skin;
+        ctx.fillRect(x - r * 0.34, y + r * 0.3, r * 0.68, r * 0.74);
+        ctx.beginPath();
+        ctx.ellipse(x, y, r * 0.82, r, 0, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = hair;
+        ctx.beginPath();
+        ctx.ellipse(x, y - r * 0.15, r * 0.87, r * 0.84, 0, Math.PI, Math.PI * 2);
+        ctx.fill();
+      }
+
+      function makePhoto(seed) {
+        const w = 280, h = 640; // retrato, no formato da janela
+        const c = document.createElement("canvas");
+        c.width = w; c.height = h;
+        const ctx = c.getContext("2d");
+        const rand = rng(seed);
+
+        const g = ctx.createLinearGradient(0, 0, 0, h);
+        g.addColorStop(0, "#a8a299");
+        g.addColorStop(0.55, "#bdb7ac");
+        g.addColorStop(1, "#847f76");
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+
+        const rows = 2;
+        for (let r = 0; r < rows; r++) {
+          const t = r / (rows - 1);
+          const headR = h * 0.075 * (0.9 + t * 0.3);
+          const baseY = h * (0.4 + t * 0.26);
+          const count = 2 + ((rand() * 2) | 0);
+          const step = w / (count + 0.3);
+          for (let i = 0; i < count; i++) {
+            person(ctx, step * (i + 0.65) + (rand() - 0.5) * step * 0.18, baseY, headR, rand);
+          }
+        }
+
+        // Envelhecimento
+        const cast = CASTS[(rand() * CASTS.length) | 0];
+        const img = ctx.getImageData(0, 0, w, h);
+        const d = img.data;
+        for (let i = 0; i < d.length; i += 4) {
+          const l = (0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 255;
+          const lc = 0.5 + (l - 0.5) * 0.95;
+          for (let k = 0; k < 3; k++) {
+            const v = lc * cast[k];
+            d[i + k] = (v + (1 - v) * 0.16) * 255;
+          }
+        }
+        ctx.putImageData(img, 0, 0);
+
+        const v = ctx.createRadialGradient(w / 2, h / 2, h * 0.16, w / 2, h / 2, h * 0.72);
+        v.addColorStop(0, "rgba(0,0,0,0)");
+        v.addColorStop(1, "rgba(20,14,6,0.4)");
+        ctx.fillStyle = v;
+        ctx.fillRect(0, 0, w, h);
+
+        return c.toDataURL("image/jpeg", 0.84);
+      }
+
+      const PHOTOS = Array.from({ length: 12 }, (_, i) => makePhoto(101 + i * 37));
+
+      // =================================================================
+      // Fachada
+      // =================================================================
+      const rand = rng(7);
+      const pick = (a) => a[(rand() * a.length) | 0];
+
+      function makeWindow() {
+        const el = document.createElement("div");
+        el.className = "win";
+        el.innerHTML =
+          '<div class="win-photo"><i style="background-image:url(' + pick(PHOTOS) + ');' +
+          'animation-delay:-' + (rand() * 28).toFixed(1) + 's"></i></div>' +
+          '<div class="shutter l"></div><div class="shutter r"></div>' +
+          '<div class="win-frame"></div>';
+        return el;
+      }
+
+      function addFloors(host, floors, perFloor, prepend) {
+        const rows = [];
+        for (let f = 0; f < floors; f++) {
+          const row = document.createElement("div");
+          row.className = "floor";
+          for (let i = 0; i < perFloor; i++) row.appendChild(makeWindow());
+          rows.push(row);
+        }
+        if (prepend) rows.reverse().forEach((r) => host.prepend(r));
+        else rows.forEach((r) => host.appendChild(r));
+      }
+
+      addFloors(document.getElementById("wing-l"), 3, 6);
+      addFloors(document.getElementById("wing-r"), 3, 6);
+      // No corpo central o térreo já é a entrada, então só dois andares — e
+      // eles entram ANTES dela pra ficarem em cima.
+      addFloors(document.getElementById("bay-body"), 2, 3, true);
+
+      // =================================================================
+      // Ritmo de abertura
+      //
+      // Sem sincronia: as janelas abrem e fecham em ondas curtas, com atraso
+      // aleatório por janela. Se abrissem todas juntas viraria um efeito de
+      // slide, e não um prédio acordando.
+      // =================================================================
+      const wins = [...document.querySelectorAll(".win")];
+      const ALVO = 0.3; // fração aberta em regime
+
+      const embaralha = (a) => a.slice().sort(() => rand() - 0.5);
+
+      function ciclo() {
+        const abertas = wins.filter((w) => w.classList.contains("open"));
+        const fechadas = wins.filter((w) => !w.classList.contains("open"));
+        const falta = Math.round(wins.length * ALVO) - abertas.length;
+
+        embaralha(fechadas)
+          .slice(0, Math.max(2, falta + 3))
+          .forEach((w, i) =>
+            setTimeout(() => {
+              // Troca a foto ao abrir: cada abertura mostra algo novo.
+              w.querySelector(".win-photo i").style.backgroundImage = "url(" + pick(PHOTOS) + ")";
+              w.classList.add("open");
+            }, i * 220 + rand() * 500),
+          );
+
+        embaralha(abertas)
+          .slice(0, falta > 0 ? 2 : 4)
+          .forEach((w, i) => setTimeout(() => w.classList.remove("open"), i * 260 + rand() * 700));
+      }
+
+      ciclo();
+      setInterval(ciclo, 3600);
+
+      // Nuvens
+      const sky = document.getElementById("sky");
+      for (let i = 0; i < 6; i++) {
+        const c = document.createElement("div");
+        c.className = "cloud";
+        const size = 16 + rand() * 24;
+        c.style.width = size + "vw";
+        c.style.height = size * 0.4 + "vw";
+        c.style.top = 1 + rand() * 22 + "vh";
+        c.style.opacity = 0.3 + rand() * 0.4;
+        c.style.animationDuration = 100 + rand() * 130 + "s";
+        c.style.animationDelay = "-" + rand() * 140 + "s";
+        sky.appendChild(c);
+      }
+    </script>
   </body>
 </html>
