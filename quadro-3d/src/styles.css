@@ -1,0 +1,295 @@
+:root {
+  --ink: #f2eee6;
+  --dim: #a49e92;
+  --glass: rgba(18, 20, 24, 0.66);
+  --line: rgba(240, 236, 226, 0.14);
+  --accent: #d8c48a;
+  font-family: "Inter", "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #101216;
+  color: var(--ink);
+}
+
+#stage { display: block; width: 100vw; height: 100vh; }
+
+/* ---------- loader ---------- */
+#loader {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background: #101216;
+  color: var(--dim);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  z-index: 50;
+  transition: opacity 0.5s ease;
+}
+#loader.hide { opacity: 0; pointer-events: none; }
+.spin {
+  width: 14px; height: 14px;
+  border: 2px solid rgba(216, 196, 138, 0.25);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- HUD comum ---------- */
+.hud {
+  position: fixed;
+  z-index: 10;
+  backdrop-filter: blur(14px) saturate(1.2);
+  background: var(--glass);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 12px 14px;
+  user-select: none;
+}
+.hud-label {
+  display: block;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--dim);
+  margin-bottom: 8px;
+}
+
+.hud-title { top: 20px; left: 20px; padding: 14px 18px; }
+.hud-title h1 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+.hud-title h1 b { color: var(--accent); font-weight: 700; }
+.hud-title p {
+  margin: 5px 0 0;
+  font-size: 11px;
+  color: var(--dim);
+  letter-spacing: 0.02em;
+}
+
+/* ---------- câmeras ---------- */
+.hud-views {
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.hud-views .hud-label { margin: 0 6px 0 2px; }
+.hud-views button {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.hud-views button:hover { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
+.hud-views button.on {
+  color: #14161a;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.hud-views button.on kbd { background: rgba(0, 0, 0, 0.22); color: #14161a; border-color: transparent; }
+
+kbd {
+  font: inherit;
+  font-size: 9px;
+  line-height: 1;
+  padding: 3px 4px;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--dim);
+}
+
+/* ---------- toggles ---------- */
+.hud-toggles {
+  top: 20px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 190px;
+}
+.hud-toggles label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  color: var(--dim);
+  cursor: pointer;
+}
+.hud-toggles label:hover { color: var(--ink); }
+.hud-toggles input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; cursor: pointer; }
+.hud-toggles kbd { margin-left: auto; }
+
+.slider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 12px;
+  color: var(--dim);
+  padding-top: 4px;
+  margin-top: 2px;
+  border-top: 1px solid var(--line);
+}
+.slider input { flex: 1; accent-color: var(--accent); cursor: pointer; }
+
+/* ---------- rodapé ---------- */
+.hud-foot {
+  bottom: 20px;
+  left: 20px;
+  padding: 8px 12px;
+  font-size: 10.5px;
+  color: var(--dim);
+  letter-spacing: 0.02em;
+}
+.hud-foot .sep { margin: 0 8px; opacity: 0.4; }
+
+@media (max-width: 940px) {
+  .hud-toggles { display: none; }
+  .hud-foot { display: none; }
+}
+
+/* ---------- camada CSS3D (o display vivo) ---------- */
+#css3d {
+  position: fixed;
+  inset: 0;
+  z-index: 0; /* atrás do canvas: punch-through */
+  pointer-events: none;
+  overflow: hidden;
+}
+#css3d.front { z-index: 3; } /* modo toque: por cima de tudo */
+#css3d.interactive .live-screen { pointer-events: auto; }
+
+#stage { position: relative; z-index: 1; }
+
+.live-screen {
+  overflow: hidden;
+  background: #0e1116;
+  /* O bezel 3D já emoldura; este raio só tira o canto duro do DOM. */
+  border-radius: 2px;
+}
+/* Sem width/height aqui de propósito: o tamanho vem em pixel do JS, porque
+   <webview> não resolve porcentagem (ver createLiveScreen em screens.js). */
+.live-screen > iframe {
+  display: block;
+  border: 0;
+  background: #0e1116;
+}
+
+/* NÃO sobrescrever `display` num <webview>. Ele usa display:flex internamente
+   pra fazer o <object> filho preencher o elemento; trocar por block faz a
+   largura funcionar mas a altura colapsar pros 150px default, e a página é
+   renderizada num viewport errado. Está na documentação do Electron. */
+.live-screen > webview {
+  border: 0;
+  background: #0e1116;
+}
+
+/* ---------- seletor de versão ---------- */
+.hud-modes {
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+}
+.hud-modes .hud-label { margin: 0 6px 0 2px; }
+.hud-modes button {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.hud-modes button:hover { color: var(--ink); background: rgba(255, 255, 255, 0.06); }
+.hud-modes button.on { color: #14161a; background: var(--accent); border-color: var(--accent); }
+.hud-modes button.on kbd { background: rgba(0, 0, 0, 0.22); color: #14161a; border-color: transparent; }
+
+/* ---------- ações do display ---------- */
+.screen-actions {
+  display: flex;
+  gap: 6px;
+  padding-top: 9px;
+  margin-top: 3px;
+  border-top: 1px solid var(--line);
+}
+.screen-actions button {
+  appearance: none;
+  flex: 1;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--dim);
+  font: inherit;
+  font-size: 12px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  transition: background 0.15s, color 0.15s;
+}
+#btn-reload { flex: 0 0 38px; font-size: 14px; }
+.screen-actions button:hover:not(:disabled) { color: var(--ink); background: rgba(255, 255, 255, 0.1); }
+.screen-actions button.on { color: #14161a; background: var(--accent); border-color: var(--accent); }
+.screen-actions button.on kbd { background: rgba(0, 0, 0, 0.22); color: #14161a; border-color: transparent; }
+.screen-actions button:disabled { opacity: 0.32; cursor: not-allowed; }
+
+/* ---------- aviso do modo toque ---------- */
+#touch-banner {
+  position: fixed;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%) translateY(18px);
+  z-index: 20;
+  padding: 11px 18px;
+  border-radius: 999px;
+  background: var(--glass);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--line);
+  font-size: 12px;
+  color: var(--dim);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s, transform 0.3s;
+}
+#touch-banner b { color: var(--accent); font-weight: 600; }
+body.touching #touch-banner { opacity: 1; transform: translateX(-50%) translateY(0); }
+/* Em modo toque, o resto do HUD sai da frente. */
+body.touching .hud-views,
+body.touching .hud-foot { opacity: 0; pointer-events: none; transition: opacity 0.25s; }

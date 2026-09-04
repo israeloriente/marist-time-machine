@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'; frame-src 'self' https: http://localhost:* http://127.0.0.1:*"
+    />
+    <title>Quadro de Formandos — Marista Pio X · 2003</title>
+    <link rel="stylesheet" href="./src/styles.css" />
+  </head>
+  <body>
+    <!-- Camada CSS3D: a página web viva do display. Fica atrás do canvas
+         (punch-through) ou na frente dele (modo toque) — ver app.js. -->
+    <div id="css3d"></div>
+    <canvas id="stage"></canvas>
+
+    <div id="loader"><span class="spin"></span>montando o quadro…</div>
+
+    <header class="hud hud-title">
+      <h1>Formandos Marista <b>2003</b></h1>
+      <p>Turma São Marcelino Champagnat · Colégio Marista Pio X</p>
+    </header>
+
+    <nav class="hud hud-modes" aria-label="Versão do quadro">
+      <span class="hud-label">Versão</span>
+      <button data-mode="original" class="on"><kbd>Q</kbd> Original impresso</button>
+      <button data-mode="single"><kbd>W</kbd> Display único</button>
+    </nav>
+
+    <nav class="hud hud-views" aria-label="Câmeras">
+      <span class="hud-label">Câmera</span>
+      <button data-view="frontal"><kbd>1</kbd> Frontal</button>
+      <button data-view="tresquartos" class="on"><kbd>2</kbd> 3/4</button>
+      <button data-view="fachada"><kbd>3</kbd> Fachada</button>
+      <button data-view="turmas"><kbd>4</kbd> Turmas</button>
+      <button data-view="rasante"><kbd>5</kbd> Rasante</button>
+    </nav>
+
+    <aside class="hud hud-toggles" aria-label="Opções">
+      <span class="hud-label">Cena</span>
+      <label><input type="checkbox" id="t-acrilico" checked /> Acrílico <kbd>A</kbd></label>
+      <label><input type="checkbox" id="t-reflexo" checked /> Reflexos <kbd>R</kbd></label>
+      <label><input type="checkbox" id="t-sala" checked /> Parede e rodapé <kbd>P</kbd></label>
+      <label><input type="checkbox" id="t-girar" /> Girar <kbd>G</kbd></label>
+      <div class="slider">
+        <span>Luz</span>
+        <input type="range" id="t-luz" min="0.35" max="1.9" step="0.01" value="1" />
+      </div>
+      <div class="screen-actions">
+        <button id="btn-toque"><kbd>T</kbd> Modo toque</button>
+        <button id="btn-reload" title="Recarregar a página do display">↻</button>
+      </div>
+    </aside>
+
+    <div id="touch-banner">
+      Modo toque — a aplicação está rodando dentro do display.
+      <b>Esc</b> para voltar a orbitar.
+    </div>
+
+    <footer class="hud hud-foot">
+      <span id="foot-meta"></span>
+      <span class="sep">·</span>
+      <span>arraste para orbitar · scroll para aproximar</span>
+    </footer>
+
+    <script src="./dist/app.js"></script>
+  </body>
+</html>

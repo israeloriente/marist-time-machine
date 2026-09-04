@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <title>Cápsula Marista — offline</title>
+    <style>
+      :root { --accent: #d8c48a; }
+      * { box-sizing: border-box; margin: 0; }
+      html, body { height: 100%; }
+      body {
+        display: grid;
+        place-items: center;
+        background: radial-gradient(120% 90% at 50% 0%, #1d232e 0%, #0e1116 60%, #090b0e 100%);
+        color: #f2eee6;
+        font-family: "Inter", "Segoe UI", -apple-system, sans-serif;
+        text-align: center;
+        overflow: hidden;
+      }
+      .wrap { padding: 4vh 6vw; max-width: 1100px; }
+      .kicker {
+        font-size: clamp(10px, 1.1vw, 15px);
+        letter-spacing: 0.42em;
+        text-transform: uppercase;
+        color: var(--accent);
+        opacity: 0.85;
+      }
+      h1 {
+        margin: 2.2vh 0 0;
+        font-size: clamp(26px, 4.6vw, 74px);
+        font-weight: 300;
+        line-height: 1.08;
+        letter-spacing: -0.01em;
+      }
+      h1 b { font-weight: 700; color: var(--accent); display: block; }
+      p.lead {
+        margin: 2.4vh auto 0;
+        max-width: 30ch;
+        font-size: clamp(12px, 1.35vw, 20px);
+        line-height: 1.55;
+        color: rgba(242, 238, 230, 0.62);
+      }
+      .cta {
+        margin-top: 4.2vh;
+        display: inline-flex;
+        align-items: center;
+        gap: 14px;
+        padding: 1.5vh 3.2vw;
+        border: 1px solid rgba(216, 196, 138, 0.45);
+        border-radius: 999px;
+        font-size: clamp(11px, 1.2vw, 17px);
+        letter-spacing: 0.16em;
+        text-transform: uppercase;
+        color: var(--accent);
+        animation: breathe 2.6s ease-in-out infinite;
+      }
+      .dot {
+        width: 9px; height: 9px; border-radius: 50%;
+        background: var(--accent);
+        animation: blink 2.6s ease-in-out infinite;
+      }
+      @keyframes breathe {
+        0%, 100% { transform: scale(1); border-color: rgba(216,196,138,0.32); }
+        50% { transform: scale(1.035); border-color: rgba(216,196,138,0.8); }
+      }
+      @keyframes blink { 0%, 100% { opacity: 0.35; } 50% { opacity: 1; } }
+      .years {
+        margin-top: 5vh;
+        display: flex; flex-wrap: wrap; gap: 0.7vw;
+        justify-content: center;
+      }
+      .years span {
+        padding: 0.9vh 1.5vw;
+        border-radius: 8px;
+        background: rgba(242, 238, 230, 0.06);
+        border: 1px solid rgba(242, 238, 230, 0.08);
+        font-size: clamp(10px, 1vw, 15px);
+        color: rgba(242, 238, 230, 0.5);
+        font-variant-numeric: tabular-nums;
+      }
+      .years span.on { background: var(--accent); color: #14161a; border-color: var(--accent); font-weight: 600; }
+      footer {
+        position: fixed; bottom: 2.6vh; left: 0; right: 0;
+        font-size: clamp(9px, 0.85vw, 12px);
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: rgba(242, 238, 230, 0.26);
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="kicker">Acervo Marista Pio X</div>
+      <h1>Um pedaço de você<b>ainda está aqui.</b></h1>
+      <p class="lead">Escolha o seu ano de formatura e deixe a cápsula procurar você nas fotos do colégio.</p>
+      <div class="cta"><span class="dot"></span> Toque para começar</div>
+      <div class="years">
+        <span>1999</span><span>2000</span><span>2001</span><span>2002</span>
+        <span class="on">2003</span><span>2004</span><span>2005</span><span>2006</span>
+      </div>
+    </div>
+    <footer>modo local · sem conexão com o servidor do acervo</footer>
+  </body>
+</html>
