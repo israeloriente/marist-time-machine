@@ -855,8 +855,25 @@ function exitScreensaver() {
   scheduleInactivityCheck();
 }
 
+/** Iniciar o descanso de tela pelo botão da hero.
+ *
+ *  Precisa de um período de carência: `pointermove` está em ACTIVITY_EVENTS,
+ *  e o próprio gesto de clicar gera movimento de ponteiro logo depois. Sem
+ *  isso o descanso de tela abriria e fecharia no mesmo toque. */
+const MANUAL_SCREENSAVER_GRACE_MS = 1200;
+let screensaverGraceUntil = 0;
+
+function startScreensaverNow() {
+  if (!isHeroPhase(phase.value)) return;
+  clearInactivityTimer();
+  screensaverGraceUntil = Date.now() + MANUAL_SCREENSAVER_GRACE_MS;
+  void enterScreensaver();
+}
+
 function onUserActivity() {
   if (phase.value === "screensaver") {
+    // Ignora a atividade residual do próprio clique que abriu o descanso.
+    if (Date.now() < screensaverGraceUntil) return;
     exitScreensaver();
     return;
   }
@@ -914,6 +931,9 @@ const previousPhoto = computed(
 );
 
 const progressPct = computed(() => Math.round((progressStep.value / totalSteps) * 100));
+
+// Botão de descanso de tela (canto inferior esquerdo da hero).
+const isHero = computed(() => isHeroPhase(phase.value));
 
 // Show the QR-code card only on the hero. The screensaver was getting
 // visually noisy with the QR competing with the photo slideshow.
@@ -1335,6 +1355,32 @@ onBeforeUnmount(() => {
       @close="reportOpen = false"
     />
 
+    <!-- Descanso de tela: espelha o card do QR, no canto oposto. Deixa
+         iniciar a apresentação do acervo sem esperar os 60s de inatividade. -->
+    <Transition name="qr-fade">
+      <button
+        v-if="isHero"
+        type="button"
+        class="screensaver-btn"
+        aria-label="Iniciar descanso de tela"
+        @click="startScreensaverNow"
+      >
+        <span class="ss-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+               stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="2" y="3" width="20" height="14" rx="2" />
+            <path d="M8 21h8M12 17v4" />
+            <path d="M2.5 13.5 7 10a1.6 1.6 0 0 1 2 0l4 3.5" />
+            <circle cx="16.2" cy="7.8" r="1.5" />
+          </svg>
+        </span>
+        <span class="ss-text">
+          <strong>Descanso de tela</strong>
+          <span>Ver o acervo em apresentação</span>
+        </span>
+      </button>
+    </Transition>
+
     <!-- QR code: convida quem está olhando o kiosk a abrir o app no celular
          pra contribuir com fotos. Aparece na hero e no screensaver. -->
     <Transition name="qr-fade">
@@ -1450,6 +1496,70 @@ onBeforeUnmount(() => {
   color: var(--marista-navy);
   border-color: var(--marista-yellow);
   transform: scale(1.05);
+}
+
+/* ----- Botão de descanso de tela (canto inferior esquerdo da hero) ----- */
+.screensaver-btn {
+  position: fixed;
+  left: clamp(0.75rem, 2vw, 1.5rem);
+  bottom: clamp(0.75rem, 2vw, 1.5rem);
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.85rem 1.2rem 0.85rem 0.85rem;
+  background: rgba(255, 255, 255, 0.97);
+  color: var(--marista-navy);
+  border: none;
+  border-radius: 14px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.screensaver-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
+}
+.screensaver-btn:active { transform: translateY(0) scale(0.98); }
+.screensaver-btn:focus-visible {
+  outline: 3px solid var(--marista-yellow);
+  outline-offset: 3px;
+}
+
+.ss-icon {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 11px;
+  background: var(--marista-navy);
+  color: var(--marista-yellow);
+}
+.ss-icon svg { width: 26px; height: 26px; }
+
+.ss-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85rem;
+  line-height: 1.35;
+}
+.ss-text strong {
+  font-weight: 800;
+  font-size: 0.95rem;
+  color: var(--marista-navy);
+}
+.ss-text span { color: #4a5b73; }
+
+@media (max-width: 520px) {
+  .screensaver-btn { padding: 0.6rem 0.8rem 0.6rem 0.6rem; gap: 0.6rem; }
+  .ss-icon { width: 38px; height: 38px; border-radius: 9px; }
+  .ss-icon svg { width: 21px; height: 21px; }
+  .ss-text { font-size: 0.78rem; }
+  .ss-text strong { font-size: 0.85rem; }
 }
 
 /* ----- QR card (canto inferior direito da hero/screensaver) ----- */
