@@ -1246,7 +1246,15 @@ onBeforeUnmount(() => {
 
         <!-- Gradil e arbustos da frente, como na fachada real. -->
         <div class="facade-fence" aria-hidden="true">
-          <span v-for="n in 5" :key="n" class="shrub" :style="{ left: 6 + n * 17 + '%' }" />
+          <span
+            v-for="n in 6"
+            :key="n"
+            class="shrub"
+            :style="{
+              left: 3 + (n - 1) * 17.6 + '%',
+              height: (n % 3 === 0 ? 12.5 : n % 2 === 0 ? 9.5 : 11) + 'vh',
+            }"
+          />
         </div>
 
         <div class="screensaver-overlay">
@@ -1617,18 +1625,6 @@ onBeforeUnmount(() => {
   font-weight: 800;
   letter-spacing: -0.02em;
 }
-/* Rótulo do seletor. Fica separado da chamada de propósito: aquela vende, esta
-   instrui — e instrução funciona colada no que ela instrui. */
-.year-label {
-  margin: 2.4rem 0 0;
-  font-size: 0.95rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--marista-yellow);
-  opacity: 0.95;
-}
-
 /* A lista de anos rola, mas a barra nativa (cinza, quadrada, encostada na
    borda) destoa de tudo. Trocada por uma barra fina no azul da casa, mais uma
    máscara que esfuma o topo e a base — assim o corte deixa de ser uma linha
@@ -2116,16 +2112,21 @@ onBeforeUnmount(() => {
 .win {
   position: relative;
   flex: 1 1 0;
-  max-width: 3.7vw;
-  aspect-ratio: 1 / 2.05;
+  max-width: 4vw;
+  aspect-ratio: 1 / 1.72;
   perspective: 30vh;
 }
+/* A foto ocupa o vão INTEIRO, de baixo a cima. As duas folhas cobrem
+   exatamente essa mesma área quando fechadas, então abrir revela a foto
+   completa — sem bandeira nem peitoril comendo as pontas. */
 .win-photo {
   position: absolute;
-  inset: 5%;
+  inset: 4%;
   overflow: hidden;
   background: #171b21;
 }
+
+
 .win-photo i {
   position: absolute;
   inset: 0;
@@ -2148,13 +2149,19 @@ onBeforeUnmount(() => {
   );
 }
 
+/* Cada folha tem DUAS colunas de vidro (montante central) e três fiadas de
+   travessas — é isso que dá a malha 2x3 por folha, 4 colunas na janela toda. */
 .shutter {
   position: absolute;
-  top: 5%;
-  width: 47%;
-  height: 90%;
+  top: 4%;
+  width: 46%;
+  height: 92%;
   background:
-    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0 0.18vh, transparent 0.18vh 2.2vh),
+    linear-gradient(
+      90deg, transparent calc(50% - 0.08vh), rgba(255, 255, 255, 0.75) calc(50% - 0.08vh),
+      rgba(255, 255, 255, 0.75) calc(50% + 0.08vh), transparent calc(50% + 0.08vh)
+    ),
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.7) 0 0.16vh, transparent 0.16vh 25%),
     linear-gradient(155deg, #9ccae2 0%, var(--fac-glass) 48%, var(--fac-glass-dark) 100%);
   border: 0.16vh solid rgba(255, 255, 255, 0.9);
   box-shadow: inset 0 0 0.8vh rgba(255, 255, 255, 0.4);
@@ -2165,8 +2172,8 @@ onBeforeUnmount(() => {
     filter 1.6s ease,
     opacity 0.4s ease 0s;
 }
-.shutter.l { left: 5%; transform-origin: left center; }
-.shutter.r { right: 5%; transform-origin: right center; }
+.shutter.l { left: 4%; transform-origin: left center; }
+.shutter.r { right: 4%; transform-origin: right center; }
 
 /* Abertura TOTAL, para DENTRO: a folha recua para o interior do prédio até
    sumir, deixando o vão limpo.
