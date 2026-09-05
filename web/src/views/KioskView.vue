@@ -759,43 +759,125 @@ function clearScreensaverTimer() {
   }
 }
 
-function primeScreensaverLookahead() {
-  // Kick off decode of the next 2 photos so by the time we advance,
-  // they're already painted in cache. Won't refire if already decoding.
-  for (let lookahead = 1; lookahead <= 2; lookahead++) {
-    const p = photos.value[(slideIdx.value + lookahead) % photos.value.length];
-    if (p) void decodePhoto(p);
-  }
+// ---- Fachada do descanso de tela ------------------------------------------
+//
+// O descanso de tela é a fachada do colégio, e cada janela é um batente que
+// abre revelando uma foto do acervo atrás dela. Substitui o slideshow de foto
+// única: em vez de uma memória por vez, o prédio inteiro vai se abrindo.
+//
+// Elevação frontal, não perspectiva: um totem é olhado de frente, e a
+// simetria é o que faz o prédio ser reconhecido de longe.
+
+const FACADE_FLOORS = 3;
+const FACADE_WING_WINDOWS = 6; // por andar, em cada ala
+const FACADE_BAY_WINDOWS = 3;  // por andar no corpo central (o térreo é a entrada)
+
+// Fração das janelas abertas em regime, e o compasso das ondas.
+const FACADE_TARGET_OPEN = 0.3;
+const FACADE_CYCLE_MS = 3800;
+const FACADE_STAGGER_MS = 220;
+
+interface FacadeWindow {
+  key: string;
+  photo: RandomPhoto | null;
+  open: boolean;
+}
+interface FacadeSection {
+  key: string;
+  kind: "wing" | "bay";
+  rows: FacadeWindow[][];
 }
 
-async function advanceScreensaver() {
-  if (phase.value !== "screensaver") return;
-  if (!photos.value.length) return;
+const facadeSections = ref<FacadeSection[]>([]);
+const facadeWindows = computed(() =>
+  facadeSections.value.flatMap((s) => s.rows.flat()),
+);
 
-  const nextIdx = (slideIdx.value + 1) % photos.value.length;
-  const next = photos.value[nextIdx];
+// Nuvens fixas: posições sorteadas em tempo de render fariam o céu saltar a
+// cada repintura do Vue.
+const FACADE_CLOUDS = [
+  { key: "c1", top: "6%", size: 26, opacity: 0.55, duration: 150, delay: -10 },
+  { key: "c2", top: "3%", size: 18, opacity: 0.4, duration: 190, delay: -70 },
+  { key: "c3", top: "14%", size: 32, opacity: 0.5, duration: 220, delay: -130 },
+  { key: "c4", top: "9%", size: 22, opacity: 0.35, duration: 170, delay: -45 },
+];
 
-  screensaverLoaded.value = false;
-  const ok = await waitForPhotoDecode(next, SCREENSAVER_DECODE_TIMEOUT_MS);
+function buildFacade() {
+  const win = (key: string): FacadeWindow => ({ key, photo: null, open: false });
+  const wingRows = (side: string) =>
+    Array.from({ length: FACADE_FLOORS }, (_, f) =>
+      Array.from({ length: FACADE_WING_WINDOWS }, (_, i) => win(`${side}-${f}-${i}`)),
+    );
+  facadeSections.value = [
+    { key: "wing-l", kind: "wing", rows: wingRows("l") },
+    {
+      key: "bay",
+      kind: "bay",
+      // Um andar a menos: no térreo do corpo central fica a entrada.
+      rows: Array.from({ length: FACADE_FLOORS - 1 }, (_, f) =>
+        Array.from({ length: FACADE_BAY_WINDOWS }, (_, i) => win(`b-${f}-${i}`)),
+      ),
+    },
+    { key: "wing-r", kind: "wing", rows: wingRows("r") },
+  ];
+}
 
-  // User might have exited during the wait
-  if (phase.value !== "screensaver") return;
-
-  if (!ok) {
-    // Failed to decode within budget — skip silently to the one after.
-    slideIdx.value = nextIdx;
-    primeScreensaverLookahead();
-    screensaverTimer = window.setTimeout(advanceScreensaver, 200);
-    return;
+function shuffled<T>(items: T[]): T[] {
+  const out = items.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
   }
+  return out;
+}
 
-  slideIdx.value = nextIdx;
-  screensaverLoaded.value = true;
-  primeScreensaverLookahead();
-  screensaverTimer = window.setTimeout(
-    advanceScreensaver,
-    SCREENSAVER_PHOTO_INTERVAL_MS,
-  );
+function randomArchivePhoto(): RandomPhoto | null {
+  const pool = photos.value;
+  return pool.length ? pool[Math.floor(Math.random() * pool.length)] : null;
+}
+
+/** Abre uma janela só DEPOIS que a foto dela terminou de decodificar — senão
+ *  o batente abriria num retângulo vazio e a foto apareceria com atraso. */
+async function openWindowWithPhoto(w: FacadeWindow) {
+  if (phase.value !== "screensaver") return;
+  const p = randomArchivePhoto();
+  if (!p) return;
+  const ok = await waitForPhotoDecode(p, SCREENSAVER_DECODE_TIMEOUT_MS);
+  if (!ok || phase.value !== "screensaver") return;
+  w.photo = p;
+  w.open = true;
+}
+
+/** Uma onda: fecha algumas janelas abertas e abre outras, com atraso
+ *  escalonado. Se todas abrissem juntas viraria um efeito de slide; o que faz
+ *  parecer um prédio acordando é justamente a dessincronia. */
+function advanceFacade() {
+  if (phase.value !== "screensaver") return;
+  const wins = facadeWindows.value;
+  if (!wins.length) return;
+
+  const open = wins.filter((w) => w.open);
+  const closed = wins.filter((w) => !w.open);
+  const falta = Math.round(wins.length * FACADE_TARGET_OPEN) - open.length;
+
+  // Os setTimeout escalonados abaixo não entram no clearScreensaverTimer de
+  // propósito: cada um checa a fase antes de agir, então sair do descanso de
+  // tela já os neutraliza sem precisar rastrear dezenas de handles.
+  shuffled(closed)
+    .slice(0, Math.max(2, falta + 3))
+    .forEach((w, i) =>
+      window.setTimeout(() => void openWindowWithPhoto(w), i * FACADE_STAGGER_MS),
+    );
+
+  shuffled(open)
+    .slice(0, falta > 0 ? 2 : 4)
+    .forEach((w, i) =>
+      window.setTimeout(() => {
+        if (phase.value === "screensaver") w.open = false;
+      }, i * FACADE_STAGGER_MS),
+    );
+
+  screensaverTimer = window.setTimeout(advanceFacade, FACADE_CYCLE_MS);
 }
 
 async function enterScreensaver() {
@@ -823,21 +905,16 @@ async function enterScreensaver() {
        whatever music's already playing. */
   }
 
-  if (!photos.value.length) return; // nothing to show — wait for next attempt
-
-  // Decode the FIRST photo before painting it so we don't show a half-loaded
-  // image when the screensaver opens.
-  slideIdx.value = 0;
-  await waitForPhotoDecode(photos.value[0], SCREENSAVER_DECODE_TIMEOUT_MS);
-  if (phase.value !== "screensaver") return; // user exited during decode
-
+  // A fachada não espera foto nenhuma pra aparecer: ela é CSS. O prédio entra
+  // inteiro, de janelas fechadas, e elas vão se abrindo conforme cada foto
+  // termina de decodificar. Sem acervo, fica um prédio fechado — que ainda é
+  // uma tela apresentável, ao contrário de um preto com "carregando".
+  buildFacade();
   screensaverLoaded.value = true;
-  primeScreensaverLookahead();
+  if (!photos.value.length) return;
+
   clearScreensaverTimer();
-  screensaverTimer = window.setTimeout(
-    advanceScreensaver,
-    SCREENSAVER_PHOTO_INTERVAL_MS,
-  );
+  advanceFacade();
 }
 
 function exitScreensaver() {
@@ -849,6 +926,7 @@ function exitScreensaver() {
   currentSongTitle.value = "";
   photos.value = [];
   slideIdx.value = 0;
+  facadeSections.value = [];
   screensaverLoaded.value = false;
   phase.value = "idle";
   playHeroMusic();
@@ -1061,30 +1139,74 @@ onBeforeUnmount(() => {
         class="screensaver"
         @click="exitScreensaver"
       >
-        <transition-group name="cross" tag="div" class="slide-stack">
-          <div
-            v-if="currentPhoto && screensaverLoaded"
-            :key="currentPhoto.id"
-            class="slide-frame ken-burns"
-          >
-            <div
-              class="slide-bg"
-              :style="{ backgroundImage: `url(${currentPhoto.signed_url})` }"
-            />
-            <img
-              :src="currentPhoto.signed_url"
-              class="slide-fg"
-              alt=""
-              decoding="sync"
-            />
-          </div>
-        </transition-group>
+        <!-- A fachada do colégio. Cada janela é um batente que abre revelando
+             uma foto do acervo atrás dele. -->
+        <div class="facade-sky" aria-hidden="true">
+          <span
+            v-for="c in FACADE_CLOUDS"
+            :key="c.key"
+            class="cloud"
+            :style="{
+              top: c.top,
+              width: c.size + 'vw',
+              height: c.size * 0.4 + 'vw',
+              opacity: c.opacity,
+              animationDuration: c.duration + 's',
+              animationDelay: c.delay + 's',
+            }"
+          />
+        </div>
 
-        <!-- Skeleton: aparece enquanto a próxima foto está decodificando
-             (e na entrada inicial, antes da 1ª foto estar pronta). -->
-        <div v-if="!screensaverLoaded" class="screensaver-skeleton">
-          <div class="skeleton-shimmer" />
-          <p class="skeleton-text">Carregando memória…</p>
+        <div class="facade" :class="{ ready: screensaverLoaded }" aria-hidden="true">
+          <div
+            v-for="sec in facadeSections"
+            :key="sec.key"
+            class="facade-col"
+            :class="sec.kind"
+          >
+            <template v-if="sec.kind === 'bay'">
+              <div class="bay-cross" />
+              <div class="bay-pediment" />
+              <div class="bay-entablature" />
+              <div class="bay-name">
+                <span class="l1">COLEGIO</span>
+                <span class="l2">PIO X</span>
+              </div>
+            </template>
+
+            <div class="col-body">
+              <div v-for="(row, f) in sec.rows" :key="f" class="floor">
+                <div
+                  v-for="w in row"
+                  :key="w.key"
+                  class="win"
+                  :class="{ open: w.open }"
+                >
+                  <div class="win-photo">
+                    <i
+                      v-if="w.photo"
+                      :style="{
+                        backgroundImage: `url(${w.photo.thumb_signed_url || w.photo.signed_url})`,
+                      }"
+                    />
+                  </div>
+                  <div class="shutter l" />
+                  <div class="shutter r" />
+                  <div class="win-frame" />
+                </div>
+              </div>
+
+              <div v-if="sec.kind === 'bay'" class="entrance">
+                <div class="canopy" />
+                <div class="door" />
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Gradil e arbustos da frente, como na fachada real. -->
+        <div class="facade-fence" aria-hidden="true">
+          <span v-for="n in 5" :key="n" class="shrub" :style="{ left: 6 + n * 17 + '%' }" />
         </div>
 
         <div class="screensaver-overlay">
@@ -1703,19 +1825,9 @@ onBeforeUnmount(() => {
   position: absolute;
   inset: 0;
   z-index: 4;
-  background: #000;
+  background: linear-gradient(#2b7db9 0%, #63a8d4 42%, #a6d0e7 100%);
   cursor: pointer;
-}
-.screensaver-skeleton {
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background: linear-gradient(180deg, #0c2c4f 0%, #0a1f3a 100%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1rem;
+  overflow: hidden;
 }
 .screensaver-overlay {
   position: absolute;
@@ -1728,9 +1840,9 @@ onBeforeUnmount(() => {
   pointer-events: none;
   background: linear-gradient(
     180deg,
-    rgba(12, 44, 79, 0.35) 0%,
-    rgba(12, 44, 79, 0.05) 30%,
-    rgba(12, 44, 79, 0.55) 100%
+    rgba(9, 26, 46, 0) 0%,
+    rgba(9, 26, 46, 0.12) 45%,
+    rgba(9, 26, 46, 0.82) 100%
   );
 }
 .screensaver-hint {
@@ -1768,6 +1880,273 @@ onBeforeUnmount(() => {
   0%, 100% { opacity: 1; transform: translateY(0); }
   50%      { opacity: 0.75; transform: translateY(-4px); }
 }
+
+/* ===== Fachada do descanso de tela =========================================
+   Elevação frontal do Colégio Marista Pio X. Cada janela é um batente de duas
+   folhas; ao abrir, revela uma foto do acervo que vive ATRÁS delas.
+
+   Alinhamento dos andares: as alas e o corpo central compartilham a mesma
+   --facade-floors-h, o mesmo padding e o mesmo gap, e cada .floor é flex:1.
+   É isso que faz as fileiras baterem entre si. O corpo central é mais alto
+   apenas por causa do frontão, que fica acima da linha do telhado.
+   ========================================================================= */
+.screensaver {
+  --wall: #f1eee6;
+  --wall-lit: #fbf9f4;
+  --wall-shade: #e0dbcf;
+  --wall-deep: #cec9bb;
+  --fac-trim: #2f6389;
+  --fac-trim-dark: #1f4363;
+  --fac-glass: #74b0cd;
+  --fac-glass-dark: #4589ae;
+  --facade-floors-h: 54vh;
+}
+
+.facade-sky { position: absolute; inset: 0; z-index: 0; }
+.facade-sky .cloud {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0));
+  animation-name: facade-drift;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+@keyframes facade-drift {
+  from { transform: translateX(-35vw); }
+  to   { transform: translateX(135vw); }
+}
+
+.facade {
+  position: absolute;
+  left: 50%;
+  bottom: 17vh;
+  transform: translateX(-50%);
+  width: 96vw;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  filter: drop-shadow(0 2vh 4vh rgba(8, 22, 38, 0.4));
+  opacity: 0;
+  transition: opacity 0.6s ease;
+}
+.facade.ready { opacity: 1; }
+
+.facade-col { display: flex; flex-direction: column; align-items: center; }
+.facade-col.wing { flex: 1 1 0; }
+.facade-col.bay { flex: 0 0 26%; z-index: 2; }
+
+.col-body {
+  width: 100%;
+  height: var(--facade-floors-h);
+  padding: 2.4vh 1vw 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2vh;
+  background: linear-gradient(
+    100deg, var(--wall-shade), var(--wall) 26%, var(--wall-lit) 55%, var(--wall) 80%, var(--wall-shade)
+  );
+}
+.facade-col.wing .col-body {
+  border-top: 0.8vh solid var(--wall-lit);
+  box-shadow: inset 0 1.1vh 0 -0.4vh var(--wall-deep);
+}
+.facade-col.bay .col-body {
+  padding-left: 1.6vw;
+  padding-right: 1.6vw;
+  background: linear-gradient(100deg, var(--wall-shade), var(--wall-lit) 45%, var(--wall));
+}
+
+.floor {
+  flex: 1;
+  display: flex;
+  justify-content: space-evenly;
+  align-items: center;
+  gap: 0.5vw;
+}
+
+/* ----- coroamento do corpo central ----- */
+.bay-cross {
+  width: 0.45vh; height: 3.6vh;
+  background: var(--wall-lit);
+  position: relative;
+  margin-bottom: -0.3vh;
+}
+.bay-cross::after {
+  content: "";
+  position: absolute;
+  left: 50%; top: 24%;
+  transform: translateX(-50%);
+  width: 1.9vh; height: 0.45vh;
+  background: var(--wall-lit);
+}
+.bay-pediment {
+  width: 100%; height: 8.5vh;
+  background: linear-gradient(#fdfcf8, var(--wall-shade));
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
+}
+.bay-entablature {
+  width: 100%; height: 1.6vh;
+  background: linear-gradient(var(--wall-lit), var(--wall-deep));
+}
+.bay-name {
+  width: 100%;
+  text-align: center;
+  padding: 1.5vh 0 1.3vh;
+  background: linear-gradient(var(--wall-lit), var(--wall));
+  font-family: Georgia, "Times New Roman", serif;
+  color: var(--marista-navy);
+  letter-spacing: 0.24em;
+  line-height: 1.1;
+  text-shadow: 0 0.12vh 0 rgba(255, 255, 255, 0.95);
+}
+.bay-name .l1 { display: block; font-size: 2vh; }
+.bay-name .l2 { display: block; font-size: 3vh; font-weight: 700; }
+
+/* ----- entrada (térreo do corpo central) ----- */
+.entrance {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  align-items: center;
+}
+.canopy {
+  width: 110%;
+  height: 2vh;
+  background: linear-gradient(var(--fac-trim), var(--fac-trim-dark));
+  border-radius: 0.3vh 0.3vh 0 0;
+  box-shadow: 0 0.5vh 1.2vh rgba(0, 0, 0, 0.28);
+}
+.door {
+  width: 52%;
+  flex: 1;
+  margin-top: 0.4vh;
+  background:
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.55) 0 0.2vh, transparent 0.2vh 1.4vh),
+    linear-gradient(var(--fac-glass-dark), var(--fac-trim-dark));
+  border: 0.4vh solid var(--wall-lit);
+  border-bottom: none;
+  border-radius: 3.2vh 3.2vh 0 0;
+}
+
+/* ----- janela ----- */
+.win {
+  position: relative;
+  flex: 1 1 0;
+  max-width: 2.9vw;
+  aspect-ratio: 1 / 2.3;
+  perspective: 26vh;
+}
+.win-photo {
+  position: absolute;
+  inset: 5%;
+  overflow: hidden;
+  background: #171b21;
+}
+.win-photo i {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+  animation: facade-kenburns 26s ease-in-out infinite alternate;
+}
+@keyframes facade-kenburns {
+  from { transform: scale(1.1) translate(1%, -2%); }
+  to   { transform: scale(1.24) translate(-1%, 2%); }
+}
+/* Véu leve: a foto tem que ler como interior iluminado, não como cartaz
+   colado — mas sem escurecer a ponto de virar mancha. */
+.win-photo::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg, rgba(10, 14, 20, 0.42), rgba(10, 14, 20, 0.05) 40%, rgba(10, 14, 20, 0.38)
+  );
+}
+
+.shutter {
+  position: absolute;
+  top: 5%;
+  width: 47%;
+  height: 90%;
+  background:
+    repeating-linear-gradient(180deg, rgba(255, 255, 255, 0.55) 0 0.18vh, transparent 0.18vh 2.2vh),
+    linear-gradient(155deg, #9ccae2 0%, var(--fac-glass) 48%, var(--fac-glass-dark) 100%);
+  border: 0.16vh solid rgba(255, 255, 255, 0.9);
+  box-shadow: inset 0 0 0.8vh rgba(255, 255, 255, 0.4);
+  transition: transform 1.5s cubic-bezier(0.32, 0.72, 0.22, 1), filter 1.5s ease;
+  /* SEM backface-visibility:hidden — a folha precisa continuar visível de lado
+     quando abre, senão ela some e o efeito vira um simples fade. */
+}
+.shutter.l { left: 5%; transform-origin: left center; }
+.shutter.r { right: 5%; transform-origin: right center; }
+/* 58°, não 108°: passando de 90° a folha fica de costas e some; e mesmo a 68°
+   ela projeta só 37% da largura, o que desaparece numa janela desse tamanho.
+   A 58° sobram 53% — o suficiente pra ler como batente aberto. */
+.win.open .shutter.l { transform: rotateY(-58deg); filter: brightness(0.66) saturate(0.8); }
+.win.open .shutter.r { transform: rotateY(58deg); filter: brightness(0.88); }
+
+.win-frame {
+  position: absolute;
+  inset: 0;
+  border: 0.36vh solid var(--wall-lit);
+  box-shadow: inset 0 0 0 0.12vh var(--wall-deep), 0 0.22vh 0.5vh rgba(0, 0, 0, 0.16);
+  pointer-events: none;
+}
+.win-frame::after {
+  content: "";
+  position: absolute;
+  left: -12%; right: -12%;
+  bottom: -0.6vh;
+  height: 0.6vh;
+  background: linear-gradient(var(--wall-lit), var(--wall-deep));
+}
+
+/* ----- gradil e arbustos da frente ----- */
+.facade-fence {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 17vh;
+  z-index: 2;
+  background: linear-gradient(180deg, var(--wall-lit) 0%, var(--wall) 55%, var(--wall-shade) 100%);
+  border-top: 0.5vh solid var(--fac-trim);
+}
+/* Balaústres azuis na metade de cima, mureta cheia embaixo. */
+.facade-fence::before {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 0;
+  height: 55%;
+  background: repeating-linear-gradient(
+    90deg, var(--fac-trim) 0 0.45vw, transparent 0.45vw 2.1vw
+  );
+}
+.facade-fence::after {
+  content: "";
+  position: absolute;
+  left: 0; right: 0; top: 55%;
+  height: 0.7vh;
+  background: var(--fac-trim);
+}
+.shrub {
+  position: absolute;
+  bottom: 8vh;
+  width: 5vw;
+  height: 11vh;
+  border-radius: 50% 50% 42% 42%;
+  background: radial-gradient(ellipse at 35% 25%, #5f8f57, #33603a 65%, #24462a);
+  box-shadow: 0 0.6vh 1.4vh rgba(0, 0, 0, 0.25);
+}
+
+@media (max-width: 900px) {
+  .screensaver { --facade-floors-h: 42vh; }
+  .facade { bottom: 14vh; width: 99vw; }
+  .win { max-width: 4.4vw; }
+  .facade-fence { height: 14vh; }
+  .shrub { bottom: 6vh; width: 8vw; height: 8vh; }
+}
+
 .slide-stack { position: absolute; inset: 0; }
 .slide-frame {
   position: absolute;
