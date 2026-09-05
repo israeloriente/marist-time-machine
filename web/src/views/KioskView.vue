@@ -1122,10 +1122,7 @@ onBeforeUnmount(() => {
         <div class="hero-content">
           <span class="kicker">Colégio Marista Pio X</span>
           <h1>Um pedaço de você<br />estará sempre aqui</h1>
-          <p class="lead">
-            Volte no tempo e reviva momentos do colégio. <br />
-            Escolha o ano em que você se formou.
-          </p>
+          <p class="year-label">Selecione o ano que você se formou</p>
 
           <div class="year-picker">
             <div class="year-track">
@@ -1148,7 +1145,7 @@ onBeforeUnmount(() => {
           >
             <span v-if="phase === 'loading-camera'">Preparando…</span>
             <span v-else-if="selectedYear === null">Escolha um ano acima</span>
-            <span v-else>Volte no Tempo</span>
+            <span v-else>Bem-vindo de volta</span>
           </button>
 
           <p v-if="error" class="error">{{ error }}</p>
@@ -1620,16 +1617,38 @@ onBeforeUnmount(() => {
   font-weight: 800;
   letter-spacing: -0.02em;
 }
-.lead {
-  font-size: clamp(1.1rem, 2.2vw, 1.5rem);
-  color: var(--muted-on-dark);
-  margin: 0 auto 2.5rem;
-  max-width: 640px;
-  line-height: 1.5;
+/* Rótulo do seletor. Fica separado da chamada de propósito: aquela vende, esta
+   instrui — e instrução funciona colada no que ela instrui. */
+.year-label {
+  margin: 2.4rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--marista-yellow);
+  opacity: 0.95;
+}
+
+/* A lista de anos rola, mas a barra nativa (cinza, quadrada, encostada na
+   borda) destoa de tudo. Trocada por uma barra fina no azul da casa, mais uma
+   máscara que esfuma o topo e a base — assim o corte deixa de ser uma linha
+   dura e vira uma insinuação de que há mais conteúdo. */
+/* Rótulo do seletor. Fica separado do .lead de propósito: aquele é a chamada
+   emocional, este é a instrução — e instrução funciona colada no que ela
+   instrui, não empilhada no fim de um parágrafo. */
+.year-label {
+  margin: 2.4rem 0 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--marista-yellow);
+  opacity: 0.95;
 }
 
 .year-picker {
-  margin: 1.5rem auto 2.5rem;
+  position: relative;
+  margin: 0.6rem auto 2.5rem;
   max-width: 880px;
 }
 .year-track {
@@ -1639,8 +1658,29 @@ onBeforeUnmount(() => {
   justify-content: center;
   max-height: 200px;
   overflow-y: auto;
-  padding: 0.5rem;
+  padding: 0.9rem 0.5rem;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
+  /* Esfuma ~28px em cima e embaixo. `mask` sem prefixo cobre os navegadores
+     atuais; o -webkit fica pro WebKit mais velho de totem/tablet. */
+  -webkit-mask-image: linear-gradient(
+    to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%
+  );
+  /* Firefox */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.35) transparent;
 }
+/* WebKit/Blink */
+.year-track::-webkit-scrollbar { width: 6px; }
+.year-track::-webkit-scrollbar-track { background: transparent; }
+.year-track::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.28);
+  border-radius: 999px;
+}
+.year-track::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.45); }
 .year-chip {
   background: rgba(255, 255, 255, 0.08);
   color: var(--marista-white);
