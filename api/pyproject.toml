@@ -14,6 +14,12 @@ dependencies = [
     "pyjwt[crypto]>=2.9",
     "supabase>=2.9",
     "pgvector>=0.3.6",
+    # Declarado explicitamente porque o código o importa direto (clustering,
+    # search, photos, video). Até o pgvector 0.4 ele vinha de carona como
+    # dependência obrigatória; do 0.5 em diante virou opcional, e a imagem
+    # passou a subir sem numpy — o uvicorn morria no import e o container
+    # entrava em loop de reinício.
+    "numpy>=1.26",
     "orjson>=3.10",
     "apscheduler>=3.10.4",
     "Pillow>=10.4",
