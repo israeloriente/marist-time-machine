@@ -777,6 +777,12 @@ const FACADE_TARGET_OPEN = 0.3;
 const FACADE_CYCLE_MS = 3800;
 const FACADE_STAGGER_MS = 220;
 
+// As URLs assinadas do Storage valem 1h (expires_in=3600 em storage.py). Um
+// totem pode ficar horas no descanso de tela, então o pool é renovado bem
+// antes disso — senão as janelas passariam a abrir em imagem quebrada.
+const FACADE_POOL_REFRESH_MS = 25 * 60 * 1000;
+let facadePoolTimer: number | null = null;
+
 interface FacadeWindow {
   key: string;
   photo: RandomPhoto | null;
@@ -848,13 +854,46 @@ async function openWindowWithPhoto(w: FacadeWindow) {
   w.open = true;
 }
 
+function clearFacadePoolTimer() {
+  if (facadePoolTimer !== null) {
+    window.clearTimeout(facadePoolTimer);
+    facadePoolTimer = null;
+  }
+}
+
+/** Solta do cache de decode as fotos de um pool que estamos descartando.
+ *  O decodedCache não tem eviction própria — só reset() o limpa — então sem
+ *  isso cada entrada no descanso de tela deixaria ~60 HTMLImageElement para
+ *  trás, e um totem ligado o dia todo acumularia todos eles. */
+function evictDecoded(items: RandomPhoto[]) {
+  for (const p of items) decodedCache.delete(p.id);
+}
+
+async function refreshFacadePool() {
+  if (phase.value !== "screensaver") return;
+  try {
+    const pool = await randomPhotos(60);
+    if (phase.value === "screensaver" && pool.length) {
+      evictDecoded(photos.value);
+      photos.value = pool;
+    }
+  } catch {
+    /* silencioso: sem rede, seguimos com o pool atual até ele expirar */
+  }
+  facadePoolTimer = window.setTimeout(refreshFacadePool, FACADE_POOL_REFRESH_MS);
+}
+
 /** Uma onda: fecha algumas janelas abertas e abre outras, com atraso
  *  escalonado. Se todas abrissem juntas viraria um efeito de slide; o que faz
  *  parecer um prédio acordando é justamente a dessincronia. */
 function advanceFacade() {
   if (phase.value !== "screensaver") return;
   const wins = facadeWindows.value;
-  if (!wins.length) return;
+  if (!wins.length) {
+    // Reagenda mesmo assim: um return seco aqui mataria o ciclo pra sempre.
+    screensaverTimer = window.setTimeout(advanceFacade, FACADE_CYCLE_MS);
+    return;
+  }
 
   const open = wins.filter((w) => w.open);
   const closed = wins.filter((w) => !w.open);
@@ -914,7 +953,9 @@ async function enterScreensaver() {
   if (!photos.value.length) return;
 
   clearScreensaverTimer();
+  clearFacadePoolTimer();
   advanceFacade();
+  facadePoolTimer = window.setTimeout(refreshFacadePool, FACADE_POOL_REFRESH_MS);
 }
 
 function exitScreensaver() {
@@ -924,6 +965,8 @@ function exitScreensaver() {
   songs.value = [];
   currentSongIdx.value = 0;
   currentSongTitle.value = "";
+  clearFacadePoolTimer();
+  evictDecoded(photos.value);
   photos.value = [];
   slideIdx.value = 0;
   facadeSections.value = [];
@@ -2033,9 +2076,9 @@ onBeforeUnmount(() => {
 .win {
   position: relative;
   flex: 1 1 0;
-  max-width: 2.9vw;
-  aspect-ratio: 1 / 2.3;
-  perspective: 26vh;
+  max-width: 3.7vw;
+  aspect-ratio: 1 / 2.05;
+  perspective: 30vh;
 }
 .win-photo {
   position: absolute;
@@ -2075,17 +2118,36 @@ onBeforeUnmount(() => {
     linear-gradient(155deg, #9ccae2 0%, var(--fac-glass) 48%, var(--fac-glass-dark) 100%);
   border: 0.16vh solid rgba(255, 255, 255, 0.9);
   box-shadow: inset 0 0 0.8vh rgba(255, 255, 255, 0.4);
-  transition: transform 1.5s cubic-bezier(0.32, 0.72, 0.22, 1), filter 1.5s ease;
-  /* SEM backface-visibility:hidden — a folha precisa continuar visível de lado
-     quando abre, senão ela some e o efeito vira um simples fade. */
+  /* Fechando, a folha reaparece imediatamente e só então gira de volta — por
+     isso a opacidade aqui não tem atraso. O atraso vive na regra .open. */
+  transition:
+    transform 1.6s cubic-bezier(0.32, 0.72, 0.22, 1),
+    filter 1.6s ease,
+    opacity 0.4s ease 0s;
 }
 .shutter.l { left: 5%; transform-origin: left center; }
 .shutter.r { right: 5%; transform-origin: right center; }
-/* 58°, não 108°: passando de 90° a folha fica de costas e some; e mesmo a 68°
-   ela projeta só 37% da largura, o que desaparece numa janela desse tamanho.
-   A 58° sobram 53% — o suficiente pra ler como batente aberto. */
-.win.open .shutter.l { transform: rotateY(-58deg); filter: brightness(0.66) saturate(0.8); }
-.win.open .shutter.r { transform: rotateY(58deg); filter: brightness(0.88); }
+
+/* Abertura TOTAL, para DENTRO: a folha recua para o interior do prédio até
+   sumir, deixando o vão limpo.
+   Os sinais são invertidos em relação a abrir para fora — com origem na
+   dobradiça, rotateY positivo joga a borda livre da folha esquerda para dentro
+   da tela, e negativo faz o mesmo pela direita.
+   A rotação sozinha NÃO faz sumir: a 90° a folha fica de perfil (largura zero),
+   mas passando disso ela reapareceria de costas. Daí o fade — atrasado 1.05s
+   para a folha ficar visível girando durante quase todo o percurso e só apagar
+   no fim, já quase de perfil. O brilho cai junto porque, virada para dentro,
+   ela deixa de pegar a luz da fachada. */
+.win.open .shutter {
+  opacity: 0;
+  filter: brightness(0.45) saturate(0.7);
+  transition:
+    transform 1.6s cubic-bezier(0.32, 0.72, 0.22, 1),
+    filter 1.6s ease,
+    opacity 0.5s ease 1.05s;
+}
+.win.open .shutter.l { transform: rotateY(100deg); }
+.win.open .shutter.r { transform: rotateY(-100deg); }
 
 .win-frame {
   position: absolute;
@@ -2142,7 +2204,7 @@ onBeforeUnmount(() => {
 @media (max-width: 900px) {
   .screensaver { --facade-floors-h: 42vh; }
   .facade { bottom: 14vh; width: 99vw; }
-  .win { max-width: 4.4vw; }
+  .win { max-width: 5.6vw; }
   .facade-fence { height: 14vh; }
   .shrub { bottom: 6vh; width: 8vw; height: 8vh; }
 }
